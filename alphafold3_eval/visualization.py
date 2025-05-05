@@ -36,7 +36,7 @@ def plot_mse_distributions(df: pd.DataFrame, output_path: Union[str, Path],
 
     # Plot individual points
     sns.stripplot(data=df, x=x_col, y=y_col, jitter=True,
-                alpha=0.7, size=6, palette=combo_to_color)
+                  alpha=0.7, size=6, hue=x_col, palette=combo_to_color, legend=False)
 
     # Overlay group mean ± std
     grouped = df.groupby(x_col)[y_col]
@@ -82,7 +82,7 @@ def plot_binding_energy_boxplot(df: pd.DataFrame, output_path: Union[str, Path],
     combo_to_color = dict(zip(df[x_col].unique(), palette))
 
     # Create boxplot
-    sns.boxplot(data=df, x=x_col, y=y_col, palette=combo_to_color)
+    sns.boxplot(data=df, x=x_col, y=y_col, hue=x_col, palette=combo_to_color, legend=False)
 
     # Add individual points
     sns.stripplot(data=df, x=x_col, y=y_col, color='black',
