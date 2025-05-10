@@ -11,10 +11,16 @@ import numpy as np
 import pandas as pd
 from Bio.PDB import MMCIFParser
 
+from alphafold3_eval.structure_uitls import (
+    load_structure,
+)
+
 from alphafold3_eval.config import Config
 from alphafold3_eval.structure_uitls import (
     extract_best_model_from_zip,
-    parse_model_filename
+    parse_model_filename,
+    load_alphafold2_multimer_model,
+    group_af2_multimer_models
 )
 from alphafold3_eval.alignment import (
     align_structure_to_reference,
@@ -36,9 +42,27 @@ from alphafold3_eval.visualization import (
 )
 
 
-def extract_models(input_dir: str, config: Config) -> Dict[str, List[str]]:
+def extract_models(input_dir: str, config: Config, input_format: str = "alphafold3") -> Dict[str, List[str]]:
     """
-    Extract best models from all ZIP files in the input directory.
+    Extract best models from input files based on format.
+
+    Args:
+        input_dir: Directory containing input files
+        config: Configuration object
+        input_format: Format of input files ("alphafold3" or "alphafold2_multimer")
+
+    Returns:
+        Dictionary mapping combinations to lists of model paths
+    """
+    if input_format.lower() == "alphafold2_multimer":
+        return extract_models_af2_multimer(input_dir, config)
+    else:
+        return extract_models_af3_zip(input_dir, config)
+
+
+def extract_models_af3_zip(input_dir: str, config: Config) -> Dict[str, List[str]]:
+    """
+    Extract best models from AlphaFold3 ZIP files.
 
     Args:
         input_dir: Directory containing ZIP files
@@ -47,7 +71,8 @@ def extract_models(input_dir: str, config: Config) -> Dict[str, List[str]]:
     Returns:
         Dictionary mapping combinations to lists of model paths
     """
-    print("Extracting best models from ZIP files...")
+
+    print("Extracting best models from AlphaFold3 ZIP files...")
 
     zip_files = glob.glob(os.path.join(input_dir, "*.zip"))
     if not zip_files:
@@ -88,7 +113,8 @@ def extract_models(input_dir: str, config: Config) -> Dict[str, List[str]]:
         print(f"  Processing {combination} ({len(zip_list)} seeds)")
 
         if len(zip_list) < config.analysis_config["min_seeds"]:
-            print(f"Warning: {combination} has only {len(zip_list)} seeds, minimum required is {config.analysis_config['min_seeds']}")
+            print(
+                f"  ⚠Warning: {combination} has only {len(zip_list)} seeds, minimum required is {config.analysis_config['min_seeds']}")
             continue
 
         model_paths = []
@@ -114,6 +140,54 @@ def extract_models(input_dir: str, config: Config) -> Dict[str, List[str]]:
     return combination_to_models
 
 
+def extract_models_af2_multimer(input_dir: str, config: Config) -> Dict[str, List[str]]:
+    """
+    Extract models from AlphaFold2-Multimer directory structure.
+
+    Args:
+        input_dir: Directory containing AlphaFold2-Multimer predictions
+        config: Configuration object
+
+    Returns:
+        Dictionary mapping combinations to lists of model paths
+    """
+    print("Finding AlphaFold2-Multimer models...")
+
+    # Find all model files
+    model_paths = load_alphafold2_multimer_model(
+        input_dir,
+        subfolder_pattern="*_seed*",
+        model_file="top_model.pdb"
+    )
+
+    if not model_paths:
+        # Try alternate model naming
+        model_paths = load_alphafold2_multimer_model(
+            input_dir,
+            subfolder_pattern="*_seed*",
+            model_file="ranked_0.pdb"
+        )
+
+    if not model_paths:
+        raise ValueError(f"No AlphaFold2-Multimer models found in {input_dir}")
+
+    # Group models by combination
+    combination_to_models = group_af2_multimer_models(model_paths)
+
+    # Filter combinations with too few seeds
+    filtered_combinations = {}
+    for combination, model_list in combination_to_models.items():
+        if len(model_list) < config.analysis_config["min_seeds"]:
+            print(
+                f"  ⚠Warning: {combination} has only {len(model_list)} seeds, minimum required is {config.analysis_config['min_seeds']}")
+            continue
+
+        print(f"  Processing {combination} ({len(model_list)} seeds)")
+        filtered_combinations[combination] = model_list
+
+    return filtered_combinations
+
+
 def analyze_mse(combination_to_models: Dict[str, List[str]], config: Config) -> pd.DataFrame:
     """
     Analyze antigen-aligned MSE for each combination.
@@ -132,10 +206,22 @@ def analyze_mse(combination_to_models: Dict[str, List[str]], config: Config) -> 
     for combination, model_paths in combination_to_models.items():
         print(f"  Computing MSE for {combination}")
 
-        # Parse combination
+        # Parse combination safely
         parts = combination.split('_')
-        binding_entity = parts[0] + '_' + parts[1]
-        antigen = parts[2]
+
+        # Handle different naming conventions
+        if len(parts) >= 3:
+            # Format like "nbALB_8y9t_alb"
+            binding_entity = f"{parts[0]}_{parts[1]}"
+            antigen = parts[2]
+        elif len(parts) == 2:
+            # Format like "nbALB_alb"
+            binding_entity = parts[0]
+            antigen = parts[1]
+        else:
+            # Fallback case
+            binding_entity = combination
+            antigen = "unknown"
 
         # Compute MSE
         mse = compute_antigen_aligned_mse(model_paths)
@@ -157,13 +243,13 @@ def analyze_mse(combination_to_models: Dict[str, List[str]], config: Config) -> 
 
     # Save results
     results_df.to_csv(config.output_files["mse_results"], index=False)
-    print(f"MSE results saved to: {config.output_files['mse_results']}")
+    print(f"  MSE results saved to: {config.output_files['mse_results']}")
 
     return results_df
 
 
 def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
-                         config: Config, use_prodigy: bool = True) -> pd.DataFrame:
+                           config: Config, use_prodigy: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Analyze binding energy for each model using both methods.
 
@@ -173,11 +259,9 @@ def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
         use_prodigy: Whether to use PRODIGY for binding energy calculation
 
     Returns:
-        DataFrame with binding energy results
+        Tuple of (unscaled_df, scaled_df) with binding energy results
     """
     print("Analyzing binding energy...")
-
-    parser = MMCIFParser(QUIET=True)
 
     # Create temp directory for PRODIGY PDB files
     prodigy_temp_dir = os.path.join(config.temp_dir, "prodigy_pdbs")
@@ -190,8 +274,12 @@ def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
 
         # Parse combination
         parts = combination.split('_')
-        binding_entity = parts[0] + '_' + parts[1]
-        antigen = parts[2]
+        if len(parts) >= 3:
+            binding_entity = parts[0] + '_' + parts[1]
+            antigen = parts[2]
+        else:
+            binding_entity = parts[0]
+            antigen = parts[1]
 
         # Create reference for alignment
         reference_structure = None
@@ -204,8 +292,10 @@ def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
                 if not meta:
                     continue
 
-                # Load structure
-                structure = parser.get_structure(combination, model_path)
+                # Load structure based on file extension
+                structure = load_structure(model_path)
+                if not structure:
+                    continue
 
                 # Store binding entity name in structure for antibody type detection
                 structure.binding_entity = binding_entity
@@ -254,13 +344,13 @@ def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
                 records.append(record)
 
             except Exception as e:
-                print(f"Error processing {model_path}: {e}")
+                print(f"  Error processing {model_path}: {e}")
 
     # Create DataFrame
     df_models = pd.DataFrame(records)
 
     if df_models.empty:
-        raise ValueError("No valid models processed - check CIF integrity or parsing.")
+        raise ValueError("No valid models processed - check file integrity or parsing.")
 
     # Create normalized versions with scaling for two-chain antibodies
     df_models_scaled = df_models.copy()
@@ -286,12 +376,12 @@ def analyze_binding_energy(combination_to_models: Dict[str, List[str]],
 
     # Save unscaled results
     df_save.to_csv(config.output_files["binding_energy"], index=False)
-    print(f"Binding energy results saved to: {config.output_files['binding_energy']}")
+    print(f"  Binding energy results saved to: {config.output_files['binding_energy']}")
 
     # Save scaled results
     scaled_path = str(config.output_files["binding_energy"]).replace(".csv", "_scaled.csv")
     df_save_scaled.to_csv(scaled_path, index=False)
-    print(f"Scaled binding energy results saved to: {scaled_path}")
+    print(f"  Scaled binding energy results saved to: {scaled_path}")
 
     # Clean up temporary PDB files
     shutil.rmtree(prodigy_temp_dir, ignore_errors=True)
@@ -481,26 +571,29 @@ def cleanup_intermediate_files(config: Config) -> None:
 
 
 def run_pipeline(input_dir: str, config: Config, use_prodigy: bool = True,
-                 clean_intermediate: bool = False) -> None:
+                 clean_intermediate: bool = False, input_format: str = "alphafold3") -> None:
     """
     Run the complete analysis pipeline.
 
     Args:
-        input_dir: Directory containing input ZIP files
+        input_dir: Directory containing input files
         config: Configuration object
         use_prodigy: Whether to use PRODIGY for binding energy calculation
         clean_intermediate: Whether to clean up intermediate files after analysis
+        input_format: Format of input files ("alphafold3" or "alphafold2_multimer")
     """
-    print(f"Starting AlphaFold3 binding evaluation pipeline...")
-    print(f"Input directory: {input_dir}")
-    print(f"Output directory: {config.results_dir}")
-    print(f"Using PRODIGY: {use_prodigy}")
+    print(f"Starting AlphaFold binding evaluation pipeline...")
+    print(f"  Input directory: {input_dir}")
+    print(f"  Output directory: {config.results_dir}")
+    print(f"  Using PRODIGY: {use_prodigy}")
+    print(f"  Input format: {input_format}")
+    config.analysis_config["min_seeds"] = 2
 
-    # Step 1: Extract models
-    combination_to_models = extract_models(input_dir, config)
+    # Step 1: Extract models based on format
+    combination_to_models = extract_models(input_dir, config, input_format)
 
     if not combination_to_models:
-        raise ValueError("No valid models extracted")
+        raise ValueError(f"No valid models extracted from {input_dir} using format {input_format}")
 
     # Step 2: Analyze MSE
     df_mse = analyze_mse(combination_to_models, config)
@@ -520,7 +613,7 @@ def run_pipeline(input_dir: str, config: Config, use_prodigy: bool = True,
         how="outer"
     )
     df_combined.to_csv(config.output_files["combined_results"], index=False)
-    print(f"Combined results saved to: {config.output_files['combined_results']}")
+    print(f"  Combined results saved to: {config.output_files['combined_results']}")
 
     # Step 6: Save combined results (scaled)
     df_combined_scaled = pd.merge(
@@ -531,7 +624,7 @@ def run_pipeline(input_dir: str, config: Config, use_prodigy: bool = True,
     )
     scaled_path = str(config.output_files["combined_results"]).replace(".csv", "_scaled.csv")
     df_combined_scaled.to_csv(scaled_path, index=False)
-    print(f"Scaled combined results saved to: {scaled_path}")
+    print(f"  Scaled combined results saved to: {scaled_path}")
 
     # Step 7: Create visualizations (unscaled)
     create_visualizations(df_models, df_summary, df_mse, config, is_scaled=False)

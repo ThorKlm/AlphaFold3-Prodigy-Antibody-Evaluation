@@ -14,8 +14,11 @@ from Bio.PDB.Residue import Residue
 from Bio.PDB.PDBIO import PDBIO
 from scipy.spatial.distance import pdist, squareform
 
-from alphafold3_eval.structure_uitls import split_chains_by_type
-
+from alphafold3_eval.structure_uitls import (
+    split_chains_by_type,
+    load_structure,
+    alternative_structure_loading
+)
 
 def extract_interface_residues(structure: Structure,
                              cutoff: float = 5.0) -> Tuple[List[Residue],
@@ -187,6 +190,7 @@ def convert_structure_to_pdb(structure: Structure, temp_dir: Optional[str] = Non
     return temp_file.name
 
 
+
 def run_prodigy_on_pdb(pdb_path: str, temp: float = 25.0) -> Optional[float]:
     """
     Run PRODIGY on a PDB file.
@@ -340,8 +344,8 @@ def run_prodigy_binding_energy_direct(structure: Structure,
 
 
 def calculate_binding_energies(structure: Structure,
-                             config: Dict,
-                             use_prodigy: bool = True) -> Dict[str, float]:
+                               config: Dict,
+                               use_prodigy: bool = True) -> Dict[str, float]:
     """
     Calculate binding energies using both methods: contact-based and PRODIGY.
 
@@ -385,22 +389,14 @@ def calculate_binding_energies(structure: Structure,
             temp_dir = config['temp_dir']
             os.makedirs(temp_dir, exist_ok=True)
 
+        print("Calculating PRODIGY binding energy...")
         try:
-            print("Calculating PRODIGY binding energy...")
-            # Try direct API first
-            prodigy_energy = run_prodigy_binding_energy_direct(
+            # Use command-line interface directly (skip Python API attempt)
+            prodigy_energy = run_prodigy_binding_energy(
                 structure,
                 temp=config.get('temperature', 25.0),
                 temp_dir=temp_dir
             )
-
-            # If direct API fails, try command-line interface
-            if prodigy_energy is None:
-                prodigy_energy = run_prodigy_binding_energy(
-                    structure,
-                    temp=config.get('temperature', 25.0),
-                    temp_dir=temp_dir
-                )
 
             results["prodigy_energy"] = prodigy_energy
 
@@ -408,7 +404,6 @@ def calculate_binding_energies(structure: Structure,
             print(f"Error calculating PRODIGY binding energy: {e}")
 
     return results
-
 
 def calculate_interface_rmsd(structures: List[Structure],
                            cutoff: float = 5.0) -> float:

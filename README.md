@@ -75,7 +75,7 @@ python -m alphafold3_eval.cli \
   --output /path/to/results \
   --temp 25.0 \          # Temperature for binding energy calculation
   --cutoff 5.0 \         # Distance cutoff for interface detection
-  --min-seeds 5 \        # Minimum seeds required for analysis
+  --min-seeds 2 \        # Minimum seeds required for analysis
   --clean                # Clean up intermediate files
 ```
 

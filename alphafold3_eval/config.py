@@ -61,7 +61,7 @@ class Config:
         # Analysis settings
         self.analysis_config = {
             "contact_cutoff": 5.0,   # Angstroms
-            "min_seeds": 5,          # Minimum number of seeds required for analysis
+            "min_seeds": 1,          # Minimum number of seeds required for analysis
             "use_prodigy": True,     # Whether to use PRODIGY for binding energy calculation
             "scale_two_chain": True, # Whether to scale binding energies of two-chain antibodies
         }

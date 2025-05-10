@@ -72,29 +72,57 @@ def compute_antigen_aligned_mse(model_paths: List[str]) -> float:
     Returns:
         MSE value or np.nan if computation fails
     """
-    parser = MMCIFParser(QUIET=True)
+    from Bio.PDB import PDBParser, MMCIFParser
+    from alphafold3_eval.structure_uitls import load_structure, alternative_structure_loading
 
     coords_antigen = []
     coords_binding_region = []
 
+    successful_models = 0
+
     for cif_path in model_paths:
         try:
-            structure = parser.get_structure(cif_path, cif_path)
+            # Try to load the structure with our robust methods
+            structure = load_structure(cif_path)
+
+            # If standard loading fails, try alternative methods
+            if structure is None:
+                print(f"Attempting alternative loading for {cif_path}")
+                structure = alternative_structure_loading(cif_path)
+
+            # If still unable to load, skip this model
+            if structure is None:
+                print(f"Skipping {cif_path} due to loading failure")
+                continue
+
+            # Split chains
             binding_chains, antigen_chains = split_chains_by_type(structure)
 
             if not binding_chains or not antigen_chains:
+                print(f"Warning: Could not identify binding chains and antigen chains in {cif_path}")
                 continue
 
+            # Compute centers
             binding_center = compute_combined_chain_center(binding_chains)
             antigen_center = compute_combined_chain_center(antigen_chains)
 
+            # Check for valid coordinates
+            if np.isnan(binding_center).any() or np.isnan(antigen_center).any():
+                print(f"Warning: Invalid coordinates in {cif_path}")
+                continue
+
+            # Add to lists
             coords_binding_region.append(binding_center)
             coords_antigen.append(antigen_center)
+            successful_models += 1
 
         except Exception as e:
             print(f"Error processing {cif_path}: {e}")
 
-    if len(coords_antigen) < 2:
+    # Check if we have enough successful models
+    if successful_models < 2:
+        print(
+            f"Warning: Only {successful_models} models were processed successfully. Need at least 2 for MSE calculation.")
         return np.nan
 
     # Align binding positions based on antigen reference
@@ -107,6 +135,8 @@ def compute_antigen_aligned_mse(model_paths: List[str]) -> float:
     # Compute MSE of aligned binding positions
     aligned_binding_positions = np.array(aligned_binding_positions)
     mse = np.mean(np.var(aligned_binding_positions, axis=0))
+
+    print(f"  Computed MSE from {successful_models} models: {mse:.4f}")
 
     return mse
 
