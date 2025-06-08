@@ -4,12 +4,37 @@ Functions for aligning protein structures.
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
-from Bio.PDB import MMCIFParser
+from Bio.PDB import MMCIFParser, PDBParser
 from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
 from Bio.SVDSuperimposer import SVDSuperimposer
 
-from alphafold3_eval.structure_uitls import split_chains_by_type
+from alphafold3_eval.structure_uitls import (
+    split_chains_by_type,
+    load_structure,
+    alternative_structure_loading
+)
+
+
+def compute_combined_chain_center(chain_list: List[Chain]) -> np.ndarray:
+    """
+    Compute the center of mass of a list of chains.
+
+    Args:
+        chain_list: List of Bio.PDB Chain objects
+
+    Returns:
+        Numpy array with the [x, y, z] coordinates of the center
+    """
+    coords = []
+    for chain in chain_list:
+        for atom in chain.get_atoms():
+            coords.append(atom.get_coord())
+
+    if not coords:
+        return np.array([np.nan, np.nan, np.nan])
+
+    return np.mean(coords, axis=0)
 
 
 def align_structure_to_reference(mobile_structure: Structure,
@@ -72,9 +97,6 @@ def compute_antigen_aligned_mse(model_paths: List[str]) -> float:
     Returns:
         MSE value or np.nan if computation fails
     """
-    from Bio.PDB import PDBParser, MMCIFParser
-    from alphafold3_eval.structure_uitls import load_structure, alternative_structure_loading
-
     coords_antigen = []
     coords_binding_region = []
 
@@ -139,24 +161,3 @@ def compute_antigen_aligned_mse(model_paths: List[str]) -> float:
     print(f"  Computed MSE from {successful_models} models: {mse:.4f}")
 
     return mse
-
-
-def compute_combined_chain_center(chain_list: List[Chain]) -> np.ndarray:
-    """
-    Compute the center of mass of a list of chains.
-
-    Args:
-        chain_list: List of Bio.PDB Chain objects
-
-    Returns:
-        Numpy array with the [x, y, z] coordinates of the center
-    """
-    coords = []
-    for chain in chain_list:
-        for atom in chain.get_atoms():
-            coords.append(atom.get_coord())
-
-    if not coords:
-        return np.array([np.nan, np.nan, np.nan])
-
-    return np.mean(coords, axis=0)

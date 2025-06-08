@@ -12,11 +12,11 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.gridspec import GridSpec
 
 
-def plot_mse_distributions(df: pd.DataFrame, output_path: Union[str, Path],
-                          x_col: str = "Combination",
-                          y_col: str = "Center_Position_MSE",
-                          title: str = "Binding Pose Consistency Across AlphaFold3 Seeds",
-                          figsize: tuple = (12, 6)) -> None:
+def plot_mse_distributions(df, output_path,
+                          x_col="Combination",
+                          y_col="Center_Position_MSE",
+                          title="Binding Pose Consistency Across AlphaFold3 Seeds",
+                          figsize=(12, 6)):
     """
     Create a strip plot of MSE values with error bars.
 
@@ -169,13 +169,13 @@ def plot_energy_vs_mse(df: pd.DataFrame, output_path: Union[str, Path],
     plt.close()
 
 
-def create_confusion_matrix_heatmap(df: pd.DataFrame, output_path: Union[str, Path],
-                                  binding_col: str = "Binding_Entity",
-                                  antigen_col: str = "Antigen",
-                                  value_col: str = "Mean_Estimated_DeltaG_kcal_per_mol",
-                                  title: str = "Binding Energy Confusion Matrix",
-                                  figsize: tuple = (10, 8),
-                                  cmap: str = "coolwarm_r") -> None:
+def create_confusion_matrix_heatmap(df, output_path,
+                                    binding_col="Binding_Entity",
+                                    antigen_col="Antigen",
+                                    value_col="Mean_Estimated_DeltaG_kcal_per_mol",
+                                    title="Binding Energy Confusion Matrix",
+                                    figsize=(14, 12),
+                                    cmap="YlOrRd"):
     """
     Create a heatmap of binding energies for all binding entity-antigen combinations.
 
@@ -189,16 +189,54 @@ def create_confusion_matrix_heatmap(df: pd.DataFrame, output_path: Union[str, Pa
         figsize: Figure size as (width, height) tuple
         cmap: Colormap for the heatmap
     """
-    # Pivot data to create confusion matrix
-    pivot_df = df.pivot_table(index=binding_col, columns=antigen_col, values=value_col)
+    # Sort the names alphabetically (case insensitive)
+    binding_entities = sorted(df[binding_col].unique(), key=str.lower)
+    antigens = sorted(df[antigen_col].unique(), key=str.lower)
 
-    # Create heatmap
+    # Remove duplicates and pivot
+    df_unique = df.drop_duplicates(subset=[binding_col, antigen_col], keep='first')
+    matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=value_col)
+    matrix = matrix.reindex(index=binding_entities, columns=antigens)
+
+    # Make the plot
     plt.figure(figsize=figsize)
-    ax = sns.heatmap(pivot_df, annot=True, fmt=".2f", cmap=cmap,
-                   cbar_kws={'label': 'Mean Estimated ΔG (kcal/mol)'})
 
-    # Final styling
-    plt.title(title)
+    # For MSE, use viridis colormap with reverse (lower is better)
+    if 'MSE' in value_col or 'mse' in value_col.lower():
+        cmap = 'viridis_r'
+        colorbar_label = 'Antigen Aligned Center Position MSE (Å²)'
+    else:
+        # For binding energy, use YlOrRd (more negative is better)
+        cmap = 'YlOrRd'
+        colorbar_label = value_col.replace('_', ' ')
+
+    # Create heatmap with exact styling from ColabFold
+    ax = sns.heatmap(
+        matrix,
+        annot=True,
+        fmt='.3f',  # 3 decimal places
+        cmap=cmap,
+        square=True,
+        linewidths=0.5,
+        cbar_kws={'label': colorbar_label},
+        annot_kws={'size': 18}  # font size for annotations
+    )
+
+    # Make colorbar label bigger
+    cbar = ax.collections[0].colorbar
+    cbar.set_label(colorbar_label, size=20)
+
+    # Highlight the diagonal - these should be the real binding pairs
+    for i in range(min(len(binding_entities), len(antigens))):
+        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
+
+    # Title and labels with exact font sizes
+    plt.title(title, fontsize=22, pad=20)
+    plt.xlabel('Antigens', fontsize=22)
+    plt.ylabel('Binding Entities', fontsize=22)
+    plt.xticks(rotation=45, ha='right', fontsize=18)
+    plt.yticks(rotation=0, fontsize=18)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
     plt.close()

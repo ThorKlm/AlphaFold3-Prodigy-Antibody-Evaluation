@@ -1,11 +1,18 @@
 """
-AlphaFold3 Binding Evaluation
-
-A tool for evaluating AlphaFold3's performance in predicting protein-protein
-interactions, specifically for antibody-antigen binding.
+AlphaFold3 Evaluation Package
 """
 
+# Version
 __version__ = "0.1.0"
 
-# Explicitly import and expose the run_pipeline function
-from alphafold3_eval.pipeline import run_pipeline
+# Import main components
+from alphafold3_eval.config import Config
+from alphafold3_eval.alignment import compute_antigen_aligned_mse
+from alphafold3_eval.binding_analysis import calculate_binding_energies
+
+# Don't import pipeline functions here to avoid circular imports
+__all__ = [
+    "Config",
+    "compute_antigen_aligned_mse",
+    "calculate_binding_energies"
+]
