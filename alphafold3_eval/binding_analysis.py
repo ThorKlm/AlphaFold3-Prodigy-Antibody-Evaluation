@@ -1,6 +1,9 @@
 """
 Functions for analyzing protein-protein binding interactions.
 """
+"""
+Functions for analyzing protein-protein binding interactions.
+"""
 import os
 import subprocess
 import tempfile
@@ -12,7 +15,7 @@ from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
 from Bio.PDB.Residue import Residue
 from Bio.PDB.PDBIO import PDBIO
-from scipy.spatial.distance import pdist, squareform
+# Remove this line: from scipy.spatial.distance import pdist, squareform
 
 from alphafold3_eval.structure_uitls import (
     split_chains_by_type,
@@ -161,31 +164,42 @@ def detect_antibody_type(binding_entity: str) -> int:
 
 
 def convert_structure_to_pdb(structure: Structure, temp_dir: Optional[str] = None) -> str:
-    """
-    Convert a BioPython structure to PDB format and save to a temporary file.
+    """Convert a BioPython structure to PDB format and save to a temporary file."""
 
-    Args:
-        structure: Bio.PDB Structure to convert
-        temp_dir: Directory to save the temporary file (default: system temp dir)
-
-    Returns:
-        Path to the temporary PDB file
-    """
-    # Create a temporary directory if not provided
+    # Fix path handling
     if temp_dir:
+        # Normalize path to avoid doubling
+        temp_dir = os.path.normpath(temp_dir)
         os.makedirs(temp_dir, exist_ok=True)
-        prefix = os.path.join(temp_dir, "structure_")
-    else:
-        prefix = None
 
-    # Create a temporary file
-    temp_file = tempfile.NamedTemporaryFile(suffix='.pdb', delete=False, prefix=prefix)
+        # Create temporary file in the specified directory
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix='.pdb',
+            delete=False,
+            dir=temp_dir  # Use dir parameter correctly
+        )
+    else:
+        temp_file = tempfile.NamedTemporaryFile(suffix='.pdb', delete=False)
+
     temp_file.close()
+    print(f"    DEBUG: Created temp file: {temp_file.name}")
 
     # Write structure to PDB file
-    io = PDBIO()
-    io.set_structure(structure)
-    io.save(temp_file.name)
+    try:
+        io = PDBIO()
+        io.set_structure(structure)
+        io.save(temp_file.name)
+        print(f"    DEBUG: Successfully wrote PDB to: {temp_file.name}")
+
+        # Verify file exists
+        if os.path.exists(temp_file.name):
+            print(f"    DEBUG: File exists and size: {os.path.getsize(temp_file.name)} bytes")
+        else:
+            print(f"    DEBUG: ERROR - File does not exist after writing!")
+
+    except Exception as e:
+        print(f"    DEBUG: Error writing PDB file: {e}")
+        return None
 
     return temp_file.name
 
@@ -249,37 +263,41 @@ def run_prodigy_on_pdb(pdb_path: str, temp: float = 25.0) -> Optional[float]:
 
 
 def run_prodigy_binding_energy(structure: Structure,
-                             temp: float = 25.0,
-                             temp_dir: Optional[str] = None) -> Optional[float]:
-    """
-    Calculate binding energy using PRODIGY.
+                               temp: float = 25.0,
+                               temp_dir: Optional[str] = None) -> Optional[float]:
+    """Calculate binding energy using PRODIGY."""
 
-    Args:
-        structure: Bio.PDB Structure to analyze
-        temp: Temperature in Celsius for binding energy calculation
-        temp_dir: Directory to save temporary files (default: system temp dir)
+    print(f"    DEBUG: PRODIGY called with temp_dir={temp_dir}")
 
-    Returns:
-        Estimated binding energy in kcal/mol or None if calculation fails
-    """
     try:
         # Convert structure to PDB format
         pdb_path = convert_structure_to_pdb(structure, temp_dir)
+        print(f"    DEBUG: PDB conversion returned: {pdb_path}")
+
+        if not pdb_path:
+            print(f"    DEBUG: PDB conversion failed")
+            return None
+
+        # Verify file exists before calling PRODIGY
+        if not os.path.exists(pdb_path):
+            print(f"    DEBUG: ERROR - PDB file does not exist: {pdb_path}")
+            return None
 
         # Run PRODIGY on the PDB file
         binding_energy = run_prodigy_on_pdb(pdb_path, temp)
+        print(f"    DEBUG: PRODIGY returned: {binding_energy}")
 
         return binding_energy
 
     except Exception as e:
-        print(f"Error running PRODIGY: {e}")
+        print(f"    DEBUG: Exception in run_prodigy_binding_energy: {e}")
         return None
 
     finally:
         # Clean up temporary file
-        if 'pdb_path' in locals() and os.path.exists(pdb_path):
+        if 'pdb_path' in locals() and pdb_path and os.path.exists(pdb_path):
             os.remove(pdb_path)
-
+            print(f"    DEBUG: Cleaned up temp file: {pdb_path}")
 
 def run_prodigy_binding_energy_direct(structure: Structure,
                                     temp: float = 25.0,
@@ -405,8 +423,64 @@ def calculate_binding_energies(structure: Structure,
 
     return results
 
+
+def estimate_binding_energy_simple(structure: Structure,
+                                   cutoff: float = 5.0) -> Tuple[float, int]:
+    """
+    Estimate binding energy using a vectorized contact-based model.
+
+    Args:
+        structure: Bio.PDB Structure to analyze
+        cutoff: Distance cutoff for contacts in Angstroms
+
+    Returns:
+        Tuple of (estimated_binding_energy, number_of_contacts)
+    """
+    binding_chains, antigen_chains = split_chains_by_type(structure)
+
+    if not binding_chains or not antigen_chains:
+        return 0.0, 0
+
+    # Get coordinates as numpy arrays (vectorized approach)
+    binding_coords = np.array([atom.coord for chain in binding_chains
+                               for atom in chain.get_atoms()])
+    antigen_coords = np.array([atom.coord for chain in antigen_chains
+                               for atom in chain.get_atoms()])
+
+    if len(binding_coords) == 0 or len(antigen_coords) == 0:
+        return 0.0, 0
+
+    # Vectorized distance calculation using broadcasting
+    # Shape: (n_binding, 1, 3) - (1, n_antigen, 3) = (n_binding, n_antigen, 3)
+    # diff = binding_coords[:, np.newaxis, :] - antigen_coords[np.newaxis, :, :]
+    # distances_sq = np.sum(diff ** 2, axis=2)
+    # distances = np.sqrt(distances_sq)
+
+    # Count contacts using boolean indexing
+    # contacts = np.sum(distances <= cutoff)
+    if len(binding_coords) * len(antigen_coords) > 1000000:  # Use chunked approach for large complexes
+        contacts = 0
+        chunk_size = 1000
+        for i in range(0, len(binding_coords), chunk_size):
+            chunk = binding_coords[i:i + chunk_size]
+            diff = chunk[:, np.newaxis, :] - antigen_coords[np.newaxis, :, :]
+            distances_sq = np.sum(diff ** 2, axis=2)
+            distances = np.sqrt(distances_sq)
+            contacts += np.sum(distances <= cutoff)
+    else:
+        # Original vectorized approach for smaller complexes
+        diff = binding_coords[:, np.newaxis, :] - antigen_coords[np.newaxis, :, :]
+        distances_sq = np.sum(diff ** 2, axis=2)
+        distances = np.sqrt(distances_sq)
+        contacts = np.sum(distances <= cutoff)
+    # Estimate binding energy (same simple model)
+    delta_g = -0.1 * contacts
+
+    return float(delta_g), int(contacts)
+
+
 def calculate_interface_rmsd(structures: List[Structure],
-                           cutoff: float = 5.0) -> float:
+                             cutoff: float = 5.0) -> float:
     """
     Calculate RMSD of interface centroids across multiple structures.
 
@@ -427,9 +501,17 @@ def calculate_interface_rmsd(structures: List[Structure],
     if len(centroids) < 2:
         return np.nan
 
-    # Calculate RMSD
+    # Calculate RMSD using numpy only
     centroids = np.array(centroids)
-    rmsd_matrix = squareform(pdist(centroids, metric='euclidean'))
-    mean_rmsd = np.mean(rmsd_matrix[np.triu_indices_from(rmsd_matrix, k=1)])
 
+    # Calculate pairwise distances manually
+    n = len(centroids)
+    distances = []
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.linalg.norm(centroids[i] - centroids[j])
+            distances.append(dist)
+
+    mean_rmsd = np.mean(distances)
     return mean_rmsd

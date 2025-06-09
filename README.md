@@ -216,3 +216,7 @@ On Windows, the following might help:
 
 - [PRODIGY](https://github.com/haddocking/prodigy) for binding energy prediction
 - [BioPython](https://biopython.org/) for structural biology tools
+
+```
+af3eval --input alphafold3_predictions --output ./results --mode mse-only
+```

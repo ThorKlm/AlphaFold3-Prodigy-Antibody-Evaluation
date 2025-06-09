@@ -197,6 +197,9 @@ def create_confusion_matrix_heatmap(df, output_path,
     df_unique = df.drop_duplicates(subset=[binding_col, antigen_col], keep='first')
     matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=value_col)
     matrix = matrix.reindex(index=binding_entities, columns=antigens)
+    if matrix.isna().all().all():
+        print(f"Warning: All values are NaN in matrix for {value_col}")
+        return
 
     # Make the plot
     plt.figure(figsize=figsize)
@@ -210,17 +213,47 @@ def create_confusion_matrix_heatmap(df, output_path,
         cmap = 'YlOrRd'
         colorbar_label = value_col.replace('_', ' ')
 
-    # Create heatmap with exact styling from ColabFold
-    ax = sns.heatmap(
-        matrix,
-        annot=True,
-        fmt='.3f',  # 3 decimal places
-        cmap=cmap,
-        square=True,
-        linewidths=0.5,
-        cbar_kws={'label': colorbar_label},
-        annot_kws={'size': 18}  # font size for annotations
-    )
+    # Initialize defaults
+    annot_labels = True
+    fmt_string = '.3f'
+    annot_kws = {'size': 18}
+
+    # Check if this is summary data with std columns
+    if 'Mean_' in value_col:
+        std_col = value_col.replace('Mean_', 'Std_')
+        if std_col in df_unique.columns:
+            # Custom error bar annotations
+            std_matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=std_col)
+            std_matrix = std_matrix.reindex(index=binding_entities, columns=antigens)
+            annot_labels = matrix.round(3).astype(str) + '\n±' + std_matrix.round(3).astype(str)
+            fmt_string = ''
+            annot_kws = {'size': 16}
+
+    if isinstance(annot_labels, np.ndarray) or isinstance(annot_labels, list):
+        # Custom annotations (with ±std), no formatting
+        ax = sns.heatmap(
+            matrix,
+            annot=annot_labels,
+            fmt='',
+            cmap=cmap,
+            square=True,
+            linewidths=0.5,
+            cbar_kws={'label': colorbar_label},
+            annot_kws=annot_kws
+        )
+    else:
+        # Standard numeric annotations
+        ax = sns.heatmap(
+            matrix,
+            annot=True,
+            fmt='.3f',
+            cmap=cmap,
+            square=True,
+            linewidths=0.5,
+            cbar_kws={'label': colorbar_label},
+            annot_kws={'size': 18},
+
+        )
 
     # Make colorbar label bigger
     cbar = ax.collections[0].colorbar
@@ -228,7 +261,10 @@ def create_confusion_matrix_heatmap(df, output_path,
 
     # Highlight the diagonal - these should be the real binding pairs
     for i in range(min(len(binding_entities), len(antigens))):
-        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
+        if 'Energy' in title or 'energy' in value_col.lower():
+            ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='blue', lw=5))
+        else:
+            ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
 
     # Title and labels with exact font sizes
     plt.title(title, fontsize=22, pad=20)

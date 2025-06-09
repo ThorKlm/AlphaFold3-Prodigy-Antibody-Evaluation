@@ -515,3 +515,48 @@ def compute_chain_center(chain_list: List[Chain]) -> np.ndarray:
         return np.array([np.nan, np.nan, np.nan])
 
     return np.mean(coords, axis=0)
+
+
+def extract_all_models_from_zip(zip_path: Union[str, Path], output_dir: Union[str, Path],
+                                max_models: int = 5) -> List[str]:
+    """
+    Extract all ranked models (up to max_models) from a ZIP archive.
+
+    Args:
+        zip_path: Path to the ZIP archive
+        output_dir: Directory to save the extracted CIF files
+        max_models: Maximum number of models to extract (default: 5)
+
+    Returns:
+        List of paths to extracted model files, ordered by rank (best first)
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            cif_files = [f for f in zf.namelist() if f.endswith('.cif')]
+            if not cif_files:
+                print(f"No CIF files found in {zip_path}")
+                return []
+
+            # Get up to max_models (sorted = ranked by quality)
+            models_to_extract = sorted(cif_files)[:max_models]
+            extracted_paths = []
+
+            seed_name = Path(zip_path).stem
+
+            for i, model_file in enumerate(models_to_extract):
+                output_filename = f"{seed_name}_model_{i}.cif"
+                output_path = output_dir / output_filename
+
+                with open(output_path, 'wb') as out_f:
+                    out_f.write(zf.read(model_file))
+
+                extracted_paths.append(str(output_path))
+
+            return extracted_paths
+
+    except Exception as e:
+        print(f"Error extracting models from {zip_path}: {e}")
+        return []

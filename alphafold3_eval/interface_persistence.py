@@ -118,6 +118,8 @@ def calculate_interface_persistence(structures: List[Structure],
     }
 
 
+# Complete the calculate_residue_persistence function in interface_persistence.py
+
 def calculate_residue_persistence(structures: List[Structure],
                                   cutoff: float = 5.0) -> Dict[str, Dict[str, float]]:
     """
@@ -141,4 +143,29 @@ def calculate_residue_persistence(structures: List[Structure],
 
         for res in binding_interface + antigen_interface:
             res_id = f"{res.parent.id}:{res.id[1]}"
-            residue_count
+            residue_counts[res_id] += 1
+
+    # Calculate persistence scores
+    binding_persistence = {}
+    antigen_persistence = {}
+
+    for res_id, count in residue_counts.items():
+        persistence_score = count / n_structures
+
+        # Determine if it's binding or antigen based on chain ID
+        chain_id = res_id.split(':')[0]
+
+        # You may need to adjust this logic based on your chain naming convention
+        # For now, assume last chain is antigen (consistent with split_chains_by_type)
+        all_chain_ids = list(set(res_id.split(':')[0] for res_id in residue_counts.keys()))
+        all_chain_ids.sort()
+
+        if chain_id == all_chain_ids[-1]:  # Last chain is antigen
+            antigen_persistence[res_id] = persistence_score
+        else:
+            binding_persistence[res_id] = persistence_score
+
+    return {
+        'binding_entity': binding_persistence,
+        'antigen': antigen_persistence
+    }
