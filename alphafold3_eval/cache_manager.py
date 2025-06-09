@@ -104,19 +104,34 @@ class BindingEnergyCache:
                 self.caches[method] = {}
 
     def _get_structure_hash(self, structure_path: str) -> str:
-        """
-        Generate a unique hash for a structure file.
+        """Generate a stable hash for structure files."""
+        return self._get_structure_hash_content_based(structure_path)
 
-        Args:
-            structure_path: Path to structure file
-
-        Returns:
-            MD5 hash of the file
+    def _get_structure_hash_content_based(self, structure_path: str) -> str:
         """
-        # Use file path and modification time for hash
-        stat = os.stat(structure_path)
-        hash_string = f"{structure_path}_{stat.st_mtime}_{stat.st_size}"
-        return hashlib.md5(hash_string.encode()).hexdigest()
+        Generate hash based on file content instead of modification time.
+        This makes caching work even when files are re-extracted.
+        """
+        try:
+            # Read file content in chunks to handle large files
+            hash_md5 = hashlib.md5()
+            with open(structure_path, "rb") as f:
+                # Read in 64kb chunks
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hash_md5.update(chunk)
+
+            # Include file size for extra verification
+            file_size = os.path.getsize(structure_path)
+            content_hash = hash_md5.hexdigest()
+
+            return f"{content_hash}_{file_size}"
+
+        except Exception as e:
+            print(f"Warning: Could not hash file content for {structure_path}: {e}")
+            # Fallback to original method
+            stat = os.stat(structure_path)
+            hash_string = f"{structure_path}_{stat.st_mtime}_{stat.st_size}"
+            return hashlib.md5(hash_string.encode()).hexdigest()
 
     def _get_combination_hash(self, model_paths: List[str]) -> str:
         """

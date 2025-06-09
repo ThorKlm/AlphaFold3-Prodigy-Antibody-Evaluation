@@ -327,25 +327,41 @@ def create_combined_plot(df_energy: pd.DataFrame, df_mse: pd.DataFrame, output_p
 
 
 def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
-                              output_path: Union[str, Path],
-                              scale_two_chain: bool = False,
-                              title: str = "AlphaFold3 Binding Evaluation Matrix",
-                              figsize: tuple = (16, 12)) -> None:
+                                output_path: Union[str, Path],
+                                scale_two_chain: bool = False,
+                                title: str = "AlphaFold3 Binding Evaluation Matrix",
+                                figsize: tuple = (16, 12)) -> None:
     """
     Create a comprehensive matrix visualization showing binding energy and MSE.
-
-    Args:
-        df_energy: DataFrame with binding energy summary
-        df_mse: DataFrame with MSE results
-        output_path: Path to save the plot
-        scale_two_chain: Whether binding energies are scaled
-        title: Plot title
-        figsize: Figure size as (width, height) tuple
+    FIXED to handle different MSE column names dynamically.
     """
-    # Merge dataframes
+
+    # FIND THE CORRECT MSE COLUMN NAME
+    mse_columns = [col for col in df_mse.columns if 'MSE' in col]
+
+    if 'Center_Position_MSE_Top' in df_mse.columns:
+        mse_col = 'Center_Position_MSE_Top'
+    elif 'Center_Position_MSE_Weighted' in df_mse.columns:
+        mse_col = 'Center_Position_MSE_Weighted'
+    elif 'Center_Position_MSE' in df_mse.columns:
+        mse_col = 'Center_Position_MSE'
+    elif mse_columns:
+        mse_col = mse_columns[0]
+    else:
+        raise ValueError(f"No MSE columns found in df_mse. Available columns: {list(df_mse.columns)}")
+
+    print(f"DEBUG: Using MSE column '{mse_col}' in matrix visualization")
+
+    # CREATE A STANDARDIZED MSE DATAFRAME FOR MERGING
+    # df_mse_standard = df_mse[["Combination", mse_col]].copy()
+    # df_mse_standard = df_mse_standard.rename(columns={mse_col: "Center_Position_MSE"})
+    df_mse_standard = df_mse[["Combination", "Center_Position_MSE_Top"]].rename(
+        columns={"Center_Position_MSE_Top": "Center_Position_MSE"})
+
+    # Merge dataframes using the standardized column
     df_combined = pd.merge(
         df_energy,
-        df_mse[["Combination", "Center_Position_MSE"]],
+        df_mse_standard,  # Use standardized dataframe
         on="Combination",
         how="left"
     )
@@ -373,12 +389,13 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
 
     mse_matrix = pd.pivot_table(
         df_combined,
-        values="Center_Position_MSE",
+        values="Center_Position_MSE",  # Now this will exist
         index="Binding_Entity",
         columns="Antigen",
         fill_value=np.nan
     ).reindex(index=binding_entities, columns=antigens)
 
+    # Rest of the function remains the same...
     # Create figure with custom layout
     fig = plt.figure(figsize=figsize)
     gs = GridSpec(3, 3, width_ratios=[10, 10, 1], height_ratios=[1, 10, 10])
@@ -474,7 +491,7 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
         ax=ax_mse,
         linewidths=0.5
     )
-    ax_mse.set_title("Pose Consistency (MSE, Å²)", fontsize=14)
+    ax_mse.set_title(f"Pose Consistency ({mse_col}, Å²)", fontsize=14)
     ax_mse.set_xlabel("Antigen", fontsize=12)
     ax_mse.set_ylabel("", fontsize=12)  # No y-label for this subplot
 
@@ -494,8 +511,8 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
     # Add explanatory text about scaling
     if scale_two_chain:
         fig.text(0.5, 0.02,
-                "Note: Two-chain antibody binding energies are scaled by 0.5 for better comparison with single-chain antibodies",
-                ha="center", fontsize=10, style="italic")
+                 "Note: Two-chain antibody binding energies are scaled by 0.5 for better comparison with single-chain antibodies",
+                 ha="center", fontsize=10, style="italic")
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0.03, 1, 0.96])
