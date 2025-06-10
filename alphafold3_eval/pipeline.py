@@ -72,124 +72,48 @@ from alphafold3_eval.visualization import (
     create_matrix_visualization
 )
 
-# Add this function for MSE-only analysis
-def run_mse_only_pipeline(input_dir, config, input_format="alphafold3"):
-    """Run MSE-only analysis without binding energy calculations."""
-    print("Starting MSE-only analysis pipeline...")
-    print("  Input directory: " + str(input_dir))
-    print("  Output directory: " + str(config.results_dir))
-    print("  Input format: " + input_format)
+# Create both MSE confusion matrices
+def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
+                          df_mse: pd.DataFrame, config: Config, is_scaled: bool = False):
+    """
+    Create all visualizations matching regenerate_visualizations.py output.
+    """
+    suffix = "_scaled" if is_scaled else ""
+    scale_text = " (Scaled)" if is_scaled else ""
 
-    # Step 1: Extract models
-    combination_to_models = extract_models(input_dir, config, input_format)
+    print(f"  Creating visualizations{scale_text}...")
 
-    if not combination_to_models:
-        raise ValueError("No valid models extracted from " + str(input_dir))
-
-    # Step 2: Analyze MSE only
-    df_mse = analyze_mse_with_cache(combination_to_models, config)
-
-    # DEBUGGING: Print what columns we actually have
-    print(f"Available columns in MSE dataframe: {list(df_mse.columns)}")
-    print("First few rows:")
-    print(df_mse.head())
-
-    # Step 3: Fix column name issue
-    # The analyze_mse_with_cache function returns different column names
-    # than what the visualization expects
-
-    # Check what MSE columns exist
+    # Find the correct MSE column name
     mse_columns = [col for col in df_mse.columns if 'MSE' in col]
-    print(f"Found MSE columns: {mse_columns}")
 
-    # Use the appropriate column for visualization
     if 'Center_Position_MSE_Top' in df_mse.columns:
         primary_mse_col = 'Center_Position_MSE_Top'
+    elif 'Center_Position_MSE_Weighted' in df_mse.columns:
+        primary_mse_col = 'Center_Position_MSE_Weighted'
     elif 'Center_Position_MSE' in df_mse.columns:
         primary_mse_col = 'Center_Position_MSE'
+    elif mse_columns:
+        primary_mse_col = mse_columns[0]
     else:
-        # Create a standard column from whatever we have
-        if mse_columns:
-            primary_mse_col = mse_columns[0]
-            # Rename it to the expected name
-            df_mse['Center_Position_MSE'] = df_mse[primary_mse_col]
-            primary_mse_col = 'Center_Position_MSE'
-        else:
-            raise ValueError("No MSE columns found in dataframe!")
+        print(f"Warning: No MSE columns found for visualization")
+        return
 
-    print(f"Using MSE column: {primary_mse_col}")
+    print(f"  Using MSE column '{primary_mse_col}' for visualizations")
 
-    # Step 4: Create visualizations with correct column name
+    # 1. MSE Distribution Plot (using consistent naming)
+    mse_plot_path = config.results_dir / f"mse_distribution_plot{suffix}.png"
     plot_mse_distributions(
         df_mse,
-        output_path=config.plot_files["mse_plot"],
-        y_col=primary_mse_col,  # Use the correct column name
-        title="Binding Pose Consistency Across AlphaFold3 Seeds"
+        output_path=mse_plot_path,
+        y_col=primary_mse_col,
+        title=f"Binding Pose Consistency Across AlphaFold3 Seeds{scale_text}"
     )
 
-    # Step 5: Create matrix heatmap
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-
-    # Sort names alphabetically
-    binding_entities = sorted(df_mse['Binding_Entity'].unique(), key=str.lower)
-    antigens = sorted(df_mse['Antigen'].unique(), key=str.lower)
-
-    # Create pivot table
-    df_unique = df_mse.drop_duplicates(subset=['Binding_Entity', 'Antigen'], keep='first')
-    matrix = df_unique.pivot(index='Binding_Entity', columns='Antigen', values=primary_mse_col)
-    matrix = matrix.reindex(index=binding_entities, columns=antigens)
-
-    # Create the heatmap
-    plt.figure(figsize=(14, 12))
-
-    ax = sns.heatmap(
-        matrix,
-        annot=True,
-        fmt='.3f',
-        cmap='viridis_r',
-        square=True,
-        linewidths=0.5,
-        cbar_kws={'label': 'Center Position MSE (Å²)'},
-        annot_kws={'size': 18}
-    )
-
-    # Styling
-    cbar = ax.collections[0].colorbar
-    cbar.set_label('Center Position MSE (Å²)', size=20)
-
-    # Highlight diagonal
-    for i in range(min(len(binding_entities), len(antigens))):
-        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
-
-    plt.title('Nanobody-Antigen Binding Matrix (AlphaFold3 MSE)', fontsize=22, pad=20)
-    plt.xlabel('Antigens', fontsize=22)
-    plt.ylabel('Nanobodies', fontsize=22)
-    plt.xticks(rotation=45, ha='right', fontsize=18)
-    plt.yticks(rotation=0, fontsize=18)
-
-    plt.tight_layout()
-    output_path = config.results_dir / "mse_matrix.png"
-    plt.savefig(output_path, dpi=300)
-    plt.close()
-
-    print("\nMSE-only analysis completed successfully!")
-    print("  MSE results saved to: " + str(config.output_files["mse_results"]))
-    print("  MSE matrix saved to: " + str(output_path))
-
-
-# Create both MSE confusion matrices
-def create_mse_visualizations(df_mse, config, scale_text=""):
-    """Create both top-model and weighted MSE visualizations with proper column handling."""
-
-    # Find available MSE columns
-    mse_columns = [col for col in df_mse.columns if 'MSE' in col]
-
-    # Create visualizations for each available MSE column
+    # 2. MSE Matrix Heatmaps (create both top model and weighted if available)
     if 'Center_Position_MSE_Top' in df_mse.columns:
         create_confusion_matrix_heatmap(
             df_mse,
-            output_path=config.results_dir / f"mse_matrix_top_model{scale_text}.png",
+            output_path=config.results_dir / f"mse_matrix_top_model{suffix}.png",
             value_col="Center_Position_MSE_Top",
             title=f"Binding Pose Consistency Matrix (Top Model){scale_text}",
             cmap="viridis_r"
@@ -198,22 +122,78 @@ def create_mse_visualizations(df_mse, config, scale_text=""):
     if 'Center_Position_MSE_Weighted' in df_mse.columns:
         create_confusion_matrix_heatmap(
             df_mse,
-            output_path=config.results_dir / f"mse_matrix_weighted{scale_text}.png",
+            output_path=config.results_dir / f"mse_matrix_weighted{suffix}.png",
             value_col="Center_Position_MSE_Weighted",
             title=f"Binding Pose Consistency Matrix (Weighted){scale_text}",
             cmap="viridis_r"
         )
 
-    # If neither specific column exists, use the first available MSE column
-    if 'Center_Position_MSE_Top' not in df_mse.columns and 'Center_Position_MSE_Weighted' not in df_mse.columns:
-        if mse_columns:
-            create_confusion_matrix_heatmap(
-                df_mse,
-                output_path=config.results_dir / f"mse_matrix{scale_text}.png",
-                value_col=mse_columns[0],
-                title=f"Binding Pose Consistency Matrix{scale_text}",
-                cmap="viridis_r"
+    # 3. Binding Energy Visualizations (if available)
+    if 'Mean_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
+
+        # Energy plot with error bars (matching regenerate_visualizations.py style)
+        energy_plot_path = config.results_dir / f"binding_energy_plot{suffix}.png"
+
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(12, 6))
+
+        # Create error bar plot if std column exists
+        if 'Std_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
+            x_positions = range(len(df_summary))
+            plt.errorbar(
+                x_positions,
+                df_summary['Mean_Approx_DeltaG_kcal_per_mol'],
+                yerr=df_summary['Std_Approx_DeltaG_kcal_per_mol'],
+                fmt='o',
+                capsize=5,
+                capthick=2,
+                markersize=8
             )
+            plt.xticks(x_positions, df_summary['Combination'], rotation=45, ha='right')
+        else:
+            # Fallback to simple scatter plot
+            plt.scatter(range(len(df_summary)), df_summary['Mean_Approx_DeltaG_kcal_per_mol'])
+            plt.xticks(range(len(df_summary)), df_summary['Combination'], rotation=45, ha='right')
+
+        plt.ylabel("Estimated ΔG (kcal/mol)")
+        plt.title(f"Estimated Binding Energy Across Seeds{scale_text}")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(energy_plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # Energy vs MSE scatter plot
+        df_mse_for_merge = df_mse[["Combination", primary_mse_col]].copy()
+        df_mse_for_merge = df_mse_for_merge.rename(columns={primary_mse_col: "Center_Position_MSE"})
+
+        df_combined = pd.merge(
+            df_summary,
+            df_mse_for_merge,
+            on="Combination",
+            how="left"
+        )
+
+        combined_plot_path = config.results_dir / f"energy_vs_mse_plot{suffix}.png"
+        plot_energy_vs_mse(
+            df_combined,
+            output_path=combined_plot_path,
+            x_col="Center_Position_MSE",
+            y_col="Mean_Approx_DeltaG_kcal_per_mol",
+            title=f"Mean ΔG vs Pose Consistency{scale_text}"
+        )
+
+        # Energy matrix heatmap
+        energy_matrix_path = config.results_dir / f"energy_matrix{suffix}.png"
+        create_confusion_matrix_heatmap(
+            df_summary,
+            output_path=energy_matrix_path,
+            value_col="Mean_Approx_DeltaG_kcal_per_mol",
+            title=f"Binding Energy Matrix{scale_text}",
+            cmap="YlOrRd"
+        )
+
+    print(f"  Visualizations{scale_text} completed")
 
 
 # Fix for pipeline.py run_pipeline function
@@ -306,7 +286,7 @@ def run_pipeline(input_dir, config, use_prodigy=True,
     create_visualizations(df_models, df_summary, df_mse, config, is_scaled=False)
 
     # Step 7: Create visualizations (scaled)
-    create_visualizations(df_models_scaled, df_summary_scaled, df_mse, config, is_scaled=True)
+    # create_visualizations(df_models_scaled, df_summary_scaled, df_mse, config, is_scaled=True)
 
     # Step 8: Clean up intermediate files if requested
     if clean_intermediate:
@@ -314,14 +294,10 @@ def run_pipeline(input_dir, config, use_prodigy=True,
 
     print("Pipeline completed successfully!")
 
+
 def run_mse_only_pipeline(input_dir, config, input_format="alphafold3"):
     """
-    Run MSE-only analysis without binding energy calculations.
-
-    Args:
-        input_dir: Directory containing input files
-        config: Configuration object
-        input_format: Format of input files
+    Run MSE-only analysis with consistent file naming.
     """
     print("Starting MSE-only analysis pipeline...")
     print("  Input directory: " + str(input_dir))
@@ -337,62 +313,51 @@ def run_mse_only_pipeline(input_dir, config, input_format="alphafold3"):
     # Step 2: Analyze MSE only
     df_mse = analyze_mse_with_cache(combination_to_models, config)
 
-    # Step 3: Create MSE visualizations with exact ColabFold style
-    # First, create strip plot
+    # Step 3: Create MSE visualizations with consistent naming
+
+    # Find the correct MSE column
+    mse_columns = [col for col in df_mse.columns if 'MSE' in col]
+    if 'Center_Position_MSE_Top' in df_mse.columns:
+        primary_mse_col = 'Center_Position_MSE_Top'
+    elif 'Center_Position_MSE_Weighted' in df_mse.columns:
+        primary_mse_col = 'Center_Position_MSE_Weighted'
+    elif 'Center_Position_MSE' in df_mse.columns:
+        primary_mse_col = 'Center_Position_MSE'
+    elif mse_columns:
+        primary_mse_col = mse_columns[0]
+    else:
+        raise ValueError("No MSE columns found!")
+
+    # MSE distribution plot
     plot_mse_distributions(
         df_mse,
-        output_path=config.plot_files["mse_plot"],
+        output_path=config.results_dir / "mse_distribution_plot.png",
+        y_col=primary_mse_col,
         title="Binding Pose Consistency Across AlphaFold3 Seeds"
     )
 
-    # Create MSE heatmap with exact styling
-    # Sort the names alphabetically (case insensitive)
-    binding_entities = sorted(df_mse['Binding_Entity'].unique(), key=str.lower)
-    antigens = sorted(df_mse['Antigen'].unique(), key=str.lower)
+    # MSE matrix heatmaps
+    if 'Center_Position_MSE_Top' in df_mse.columns:
+        create_confusion_matrix_heatmap(
+            df_mse,
+            output_path=config.results_dir / "mse_matrix_top_model.png",
+            value_col="Center_Position_MSE_Top",
+            title="Binding Pose Consistency Matrix (Top Model)",
+            cmap="viridis_r"
+        )
 
-    # Remove duplicates and pivot
-    df_unique = df_mse.drop_duplicates(subset=['Binding_Entity', 'Antigen'], keep='first')
-    matrix = df_unique.pivot(index='Binding_Entity', columns='Antigen', values='Center_Position_MSE')
-    matrix = matrix.reindex(index=binding_entities, columns=antigens)
-
-    # Make the plot with exact dimensions and style
-    plt.figure(figsize=(14, 12))
-
-    # Use viridis colormap with reverse (lower MSE is better)
-    ax = sns.heatmap(
-        matrix,
-        annot=True,
-        fmt='.3f',  # 3 decimal places
-        cmap='viridis_r',
-        square=True,
-        linewidths=0.5,
-        cbar_kws={'label': 'Center Position MSE (Å²)'},
-        annot_kws={'size': 18}  # font size for annotations
-    )
-
-    # Make colorbar label bigger
-    cbar = ax.collections[0].colorbar
-    cbar.set_label('Center Position MSE (Å²)', size=20)
-
-    # Highlight the diagonal - these should be the real binding pairs
-    for i in range(min(len(binding_entities), len(antigens))):
-        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
-
-    # Title and labels with exact font sizes
-    plt.title('Nanobody-Antigen Binding Matrix (AlphaFold3 MSE)', fontsize=22, pad=20)
-    plt.xlabel('Antigens', fontsize=22)
-    plt.ylabel('Nanobodies', fontsize=22)
-    plt.xticks(rotation=45, ha='right', fontsize=18)
-    plt.yticks(rotation=0, fontsize=18)
-
-    plt.tight_layout()
-    output_path = config.results_dir / "mse_matrix.png"
-    plt.savefig(output_path, dpi=300)
-    plt.close()
+    if 'Center_Position_MSE_Weighted' in df_mse.columns:
+        create_confusion_matrix_heatmap(
+            df_mse,
+            output_path=config.results_dir / "mse_matrix_weighted.png",
+            value_col="Center_Position_MSE_Weighted",
+            title="Binding Pose Consistency Matrix (Weighted)",
+            cmap="viridis_r"
+        )
 
     print("\nMSE-only analysis completed successfully!")
-    print("  MSE matrix saved to: " + str(output_path))
-
+    print("  MSE distribution plot saved to: " + str(config.results_dir / "mse_distribution_plot.png"))
+    print("  MSE matrix plots saved to results directory")
 
 def analyze_binding_energy(combination_to_models, config, use_prodigy=True):
     """
@@ -1604,103 +1569,6 @@ def save_comprehensive_report(all_results: Dict, stat_results: Dict, config: Con
         f.write("- Statistical analysis: `statistical_analysis.csv`\n")
 
     print(f"\nComprehensive report saved to: {report_path}")
-
-
-def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
-                          df_mse: pd.DataFrame, config: Config, is_scaled: bool = False):
-    """
-    Create all visualizations for the analysis results.
-    FIXED to handle different MSE column names.
-    """
-    suffix = "_scaled" if is_scaled else ""
-    scale_text = " (Scaled)" if is_scaled else ""
-
-    print(f"  Creating visualizations{scale_text}...")
-
-    # Find the correct MSE column name
-    mse_columns = [col for col in df_mse.columns if 'MSE' in col]
-
-    if 'Center_Position_MSE_Top' in df_mse.columns:
-        primary_mse_col = 'Center_Position_MSE_Top'
-    elif 'Center_Position_MSE_Weighted' in df_mse.columns:
-        primary_mse_col = 'Center_Position_MSE_Weighted'
-    elif 'Center_Position_MSE' in df_mse.columns:
-        primary_mse_col = 'Center_Position_MSE'
-    elif mse_columns:
-        primary_mse_col = mse_columns[0]
-    else:
-        print(f"Warning: No MSE columns found for visualization")
-        return
-
-    print(f"  Using MSE column '{primary_mse_col}' for visualizations")
-
-    # 1. MSE distribution plot
-    mse_plot_path = str(config.plot_files["mse_plot"]).replace(".png", f"{suffix}.png")
-    plot_mse_distributions(
-        df_mse,
-        output_path=mse_plot_path,
-        y_col=primary_mse_col,  # Use the correct column name
-        title=f"Binding Pose Consistency Across AlphaFold3 Seeds{scale_text}"
-    )
-
-    # 2. Binding energy boxplot if we have energy data
-    if 'Approx_DeltaG_kcal_per_mol' in df_models.columns:
-        energy_plot_path = str(config.plot_files["energy_plot"]).replace(".png", f"{suffix}.png")
-        plot_binding_energy_boxplot(
-            df_summary,
-            output_path=energy_plot_path,
-            y_col="Mean_Approx_DeltaG_kcal_per_mol",
-            title=f"Estimated Binding Energy Across Seeds{scale_text}"
-        )
-
-    # 3. Energy vs MSE scatter plot
-    if 'Mean_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
-        # Create a properly named MSE column for merging
-        df_mse_for_merge = df_mse[["Combination", primary_mse_col]].copy()
-        df_mse_for_merge = df_mse_for_merge.rename(columns={primary_mse_col: "Center_Position_MSE"})
-
-        df_combined = pd.merge(
-            df_summary,
-            df_mse_for_merge,
-            on="Combination",
-            how="left"
-        )
-
-        combined_plot_path = str(config.plot_files["combined_plot"]).replace(".png", f"{suffix}.png")
-        plot_energy_vs_mse(
-            df_combined,
-            output_path=combined_plot_path,
-            x_col="Center_Position_MSE",
-            y_col="Mean_Approx_DeltaG_kcal_per_mol",
-            title=f"Mean ΔG vs Pose Consistency{scale_text}"
-        )
-
-    # 4. Confusion matrix heatmaps
-    create_mse_visualizations(df_mse, config, scale_text)
-
-    # Energy heatmap if available
-    if 'Mean_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
-        energy_matrix_path = str(config.plot_files["matrix_plot"]).replace(".png", f"_energy{suffix}.png")
-        create_confusion_matrix_heatmap(
-            df_summary,
-            output_path=energy_matrix_path,
-            value_col="Mean_Approx_DeltaG_kcal_per_mol",
-            title=f"Binding Energy Matrix{scale_text}",
-            cmap="YlOrRd"
-        )
-
-    # 5. Combined matrix visualization if we have both MSE and energy data
-    if 'Mean_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
-        matrix_viz_path = str(config.plot_files["matrix_plot"]).replace(".png", f"_combined{suffix}.png")
-        create_matrix_visualization(
-            df_summary,
-            df_mse,
-            output_path=matrix_viz_path,
-            scale_two_chain=is_scaled,
-            title=f"AlphaFold3 Binding Evaluation Matrix{scale_text}"
-        )
-
-    print(f"  Visualizations{scale_text} completed")
 
 
 def cleanup_intermediate_files(config: Config):

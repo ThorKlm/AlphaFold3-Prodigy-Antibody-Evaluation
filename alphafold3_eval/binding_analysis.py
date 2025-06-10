@@ -15,7 +15,6 @@ from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
 from Bio.PDB.Residue import Residue
 from Bio.PDB.PDBIO import PDBIO
-# Remove this line: from scipy.spatial.distance import pdist, squareform
 
 from alphafold3_eval.structure_uitls import (
     split_chains_by_type,

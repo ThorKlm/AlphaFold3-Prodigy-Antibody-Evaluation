@@ -25,14 +25,15 @@ Quantifies interaction strength through dual methodologies:
 The toolkit successfully discriminates binding specificity in a 5×5 nanobody-antigen test matrix:
 
 ### Top-Model MSE Matrix
-![Top Model MSE](results/mse_matrix_top_model.png)
+<img src="results/results/mse_matrix_top_model.png" width="600">
 
-*Binding pose consistency using rank-1 AlphaFold3 models. Lower MSE (darker) indicates higher consistency, with clear diagonal patterns showing true binding pairs.*
+*Binding pose consistency using rank-1 AlphaFold3 models. Lower MSE (brighter) indicates higher consistency,
+with rather clear diagonal pattern showing true binding pairs successfully for most nanobodies.*
 
-### Weighted MSE Matrix  
-![Weighted MSE](results/mse_matrix_weighted.png)
+### Weighted MSE Matrix
+<img src="results/results/mse_matrix_weighted.png" width="600">
 
-*Enhanced discrimination using ensemble approach across all ranked models. Improved signal-to-noise ratio demonstrates the value of multi-model analysis.*
+*Enhanced discrimination using ensemble approach across all ranked models.*
 
 ## Usage
 
@@ -118,7 +119,10 @@ energy_results = calculate_binding_energies(structure, config)
 
 This approach addresses the critical challenge of distinguishing specific from non-specific protein-protein interactions in computational design. By leveraging AlphaFold3's ensemble predictions, the methodology provides quantitative metrics for binding specificity that complement traditional docking approaches.
 
-The framework demonstrates that true binding pairs exhibit significantly lower pose variance across prediction seeds compared to non-specific combinations, providing a computational signature for binding specificity assessment.
+The framework demonstrates that true binding pairs exhibit significantly lower pose variance across prediction seeds compared to non-specific combinations, providing a computational signature for binding specificity assessment. This project was developed in the context of a broader nanobody evaluation toolkit:
+
+https://github.com/ThorKlm/nanobody-evaluation-toolkit.
+
 
 ## References
 

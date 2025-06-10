@@ -18,7 +18,7 @@ def plot_mse_distributions(df, output_path,
                           title="Binding Pose Consistency Across AlphaFold3 Seeds",
                           figsize=(12, 6)):
     """
-    Create a strip plot of MSE values with error bars.
+    Create a strip plot of MSE values with error bars and individual points.
 
     Args:
         df: DataFrame containing MSE data
@@ -30,32 +30,66 @@ def plot_mse_distributions(df, output_path,
     """
     plt.figure(figsize=figsize)
 
-    # Generate consistent color palette
-    palette = sns.color_palette("tab10", n_colors=df[x_col].nunique())
-    combo_to_color = dict(zip(df[x_col].unique(), palette))
+    # Check if we have individual model data or summary data
+    if 'Num_Models' in df.columns:
+        # We have summary data with std
+        std_col = y_col.replace('Mean_', 'Std_') if 'Mean_' in y_col else f"Std_{y_col}"
 
-    # Plot individual points
-    sns.stripplot(data=df, x=x_col, y=y_col, jitter=True,
-                  alpha=0.7, size=6, hue=x_col, palette=combo_to_color, legend=False)
+        if std_col in df.columns:
+            # Create error bar plot
+            x_positions = range(len(df))
+            colors = sns.color_palette("tab10", n_colors=len(df))
 
-    # Overlay group mean ± std
-    grouped = df.groupby(x_col)[y_col]
-    means = grouped.mean()
-    stds = grouped.std()
-    positions = range(len(means))
+            plt.errorbar(
+                x_positions,
+                df[y_col],
+                yerr=df[std_col],
+                fmt='o',
+                capsize=8,
+                capthick=2,
+                markersize=10,
+                linewidth=2,
+                alpha=0.8
+            )
 
-    for i, combo in enumerate(means.index):
-        plt.errorbar(x=i, y=means[combo], yerr=stds[combo], fmt='o',
-                   color=combo_to_color[combo], capsize=5)
+            # Color the points
+            for i, (pos, mean_val) in enumerate(zip(x_positions, df[y_col])):
+                plt.scatter(pos, mean_val, color=colors[i], s=100, zorder=5)
+
+            plt.xticks(x_positions, df[x_col], rotation=45, ha='right')
+        else:
+            # Fallback to simple scatter
+            plt.scatter(range(len(df)), df[y_col], s=100)
+            plt.xticks(range(len(df)), df[x_col], rotation=45, ha='right')
+    else:
+        # We have raw data points - create strip plot with summary overlay
+        palette = sns.color_palette("tab10", n_colors=df[x_col].nunique())
+        combo_to_color = dict(zip(df[x_col].unique(), palette))
+
+        # Plot individual points
+        sns.stripplot(data=df, x=x_col, y=y_col, jitter=True,
+                      alpha=0.6, size=6, hue=x_col, palette=combo_to_color, legend=False)
+
+        # Overlay group mean with error bars
+        grouped = df.groupby(x_col)[y_col]
+        means = grouped.mean()
+        stds = grouped.std()
+        positions = range(len(means))
+
+        for i, combo in enumerate(means.index):
+            plt.errorbar(x=i, y=means[combo], yerr=stds[combo],
+                         fmt='D', color='red', capsize=8, capthick=3,
+                         markersize=8, linewidth=3, zorder=10)
+
+        plt.xticks(positions, means.index, rotation=45, ha='right')
 
     # Final styling
-    plt.xticks(positions, means.index, rotation=45, ha='right')
-    plt.ylabel("Center-Aligned MSE (Å²)")
-    plt.xlabel("Binding Entity–Antigen Combination")
+    plt.ylabel("Center-Aligned MSE (Angstrom squared)")
+    plt.xlabel("Binding Entity-Antigen Combination")
     plt.title(title)
     plt.grid(True, axis='y', linestyle='--', alpha=0.4)
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
 
@@ -65,7 +99,7 @@ def plot_binding_energy_boxplot(df: pd.DataFrame, output_path: Union[str, Path],
                                title: str = "Estimated Binding Energy Across Seeds",
                                figsize: tuple = (10, 6)) -> None:
     """
-    Create a boxplot of binding energy values.
+    Create error bar plot instead of boxplot for binding energy values.
 
     Args:
         df: DataFrame containing binding energy data
@@ -77,20 +111,59 @@ def plot_binding_energy_boxplot(df: pd.DataFrame, output_path: Union[str, Path],
     """
     plt.figure(figsize=figsize)
 
-    # Generate consistent color palette
-    palette = sns.color_palette("tab10", n_colors=df[x_col].nunique())
-    combo_to_color = dict(zip(df[x_col].unique(), palette))
+    # Check if this is summary data with std columns
+    std_col = y_col.replace('Mean_', 'Std_') if 'Mean_' in y_col else f"Std_{y_col}"
 
-    # Create boxplot
-    sns.boxplot(data=df, x=x_col, y=y_col, hue=x_col, palette=combo_to_color, legend=False)
+    if std_col in df.columns:
+        # Create error bar plot with mean and std
+        x_positions = range(len(df))
+        colors = sns.color_palette("tab10", n_colors=len(df))
 
-    # Add individual points
-    sns.stripplot(data=df, x=x_col, y=y_col, color='black',
-                jitter=True, alpha=0.6)
+        plt.errorbar(
+            x_positions,
+            df[y_col],
+            yerr=df[std_col],
+            fmt='o',
+            capsize=8,
+            capthick=2,
+            markersize=10,
+            linewidth=2,
+            alpha=0.8
+        )
+
+        # Color the points
+        for i, (pos, mean_val) in enumerate(zip(x_positions, df[y_col])):
+            plt.scatter(pos, mean_val, color=colors[i], s=100, zorder=5)
+
+        plt.xticks(x_positions, df[x_col], rotation=45, ha='right')
+    else:
+        # If no std column, create grouped error bars
+        grouped = df.groupby(x_col)[y_col]
+        means = grouped.mean()
+        stds = grouped.std()
+
+        x_positions = range(len(means))
+        colors = sns.color_palette("tab10", n_colors=len(means))
+
+        plt.errorbar(
+            x_positions,
+            means,
+            yerr=stds,
+            fmt='o',
+            capsize=8,
+            capthick=2,
+            markersize=10,
+            linewidth=2
+        )
+
+        # Color the points
+        for i, (pos, mean_val) in enumerate(zip(x_positions, means)):
+            plt.scatter(pos, mean_val, color=colors[i], s=100, zorder=5)
+
+        plt.xticks(x_positions, means.index, rotation=45, ha='right')
 
     # Final styling
-    plt.xticks(rotation=45, ha='right')
-    plt.ylabel("Estimated ΔG (kcal/mol)")
+    plt.ylabel("Estimated Delta G (kcal/mol)")
     plt.title(title)
     plt.grid(True, axis='y', linestyle='--', alpha=0.4)
     plt.tight_layout()
@@ -102,89 +175,32 @@ def plot_energy_vs_mse(df: pd.DataFrame, output_path: Union[str, Path],
                       x_col: str = "Interface_Deviation_RMSD",
                       y_col: str = "Mean_Estimated_DeltaG_kcal_per_mol",
                       combo_col: str = "Combination",
-                      title: str = "Mean ΔG vs Mean Pose Deviation per Combination",
+                      title: str = "Mean Delta G vs Mean Pose Deviation per Combination",
                       figsize: tuple = (8, 6),
                       show_regression: bool = True) -> None:
     """
-    Create a scatter plot of mean binding energy vs mean pose deviation.
-
-    Args:
-        df: DataFrame containing summary data
-        output_path: Path to save the plot
-        x_col: Column name for x-axis (pose deviation)
-        y_col: Column name for y-axis (binding energy)
-        combo_col: Column name for combination labels
-        title: Plot title
-        figsize: Figure size as (width, height) tuple
-        show_regression: Whether to show regression line
+    Empty function - removed to simplify outputs.
     """
-    plt.figure(figsize=figsize)
-
-    # Generate consistent color palette
-    palette = sns.color_palette("tab10", n_colors=df[combo_col].nunique())
-    combo_to_color = dict(zip(df[combo_col].unique(), palette))
-
-    # Create scatter plot
-    for _, row in df.iterrows():
-        if not pd.isna(row[y_col]):
-            plt.scatter(row[x_col], row[y_col],
-                      color=combo_to_color[row[combo_col]],
-                      s=100, label=row[combo_col])
-
-    # Add trendline if requested
-    if show_regression and len(df) >= 3:
-        try:
-            # Filter out NaN values
-            valid_data = df[[x_col, y_col]].dropna()
-            if len(valid_data) >= 3:
-                sns.regplot(data=valid_data, x=x_col, y=y_col,
-                          scatter=False, ci=None, color='grey',
-                          line_kws={'linestyle': '--', 'alpha': 0.7})
-        except:
-            pass  # Skip trendline if it fails
-
-    # Add labels for each point
-    for _, row in df.iterrows():
-        if not pd.isna(row[y_col]):
-            plt.annotate(
-                f"{row['Binding_Entity']}-{row['Antigen']}",
-                (row[x_col], row[y_col]),
-                xytext=(5, 5),
-                textcoords="offset points",
-                fontsize=8
-            )
-
-    # Final styling
-    plt.xlabel("Mean Seed Pose Deviation (Å)")
-    plt.ylabel("Mean Estimated ΔG (kcal/mol)")
-    plt.title(title)
-    plt.grid(True, linestyle='--', alpha=0.4)
-
-    # Add legend if not too many combinations
-    if df[combo_col].nunique() <= 10:
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
-    plt.close()
+    print(f"Skipping energy vs MSE plot: {output_path}")
+    pass
 
 
 def create_confusion_matrix_heatmap(df, output_path,
-                                    binding_col="Binding_Entity",
-                                    antigen_col="Antigen",
-                                    value_col="Mean_Estimated_DeltaG_kcal_per_mol",
-                                    title="Binding Energy Confusion Matrix",
-                                    figsize=(14, 12),
-                                    cmap="YlOrRd"):
+                                           binding_col="Binding_Entity",
+                                           antigen_col="Antigen",
+                                           value_col="Mean_Estimated_DeltaG_kcal_per_mol",
+                                           title="Binding Energy Matrix with Error Bars",
+                                           figsize=(14, 12),
+                                           cmap="YlOrRd"):
     """
-    Create a heatmap of binding energies for all binding entity-antigen combinations.
+    Create a heatmap with mean and standard deviation annotations.
 
     Args:
         df: DataFrame containing binding energy data
         output_path: Path to save the plot
         binding_col: Column name for binding entities
         antigen_col: Column name for antigens
-        value_col: Column name for binding energy values
+        value_col: Column name for values (mean)
         title: Plot title
         figsize: Figure size as (width, height) tuple
         cmap: Colormap for the heatmap
@@ -195,8 +211,11 @@ def create_confusion_matrix_heatmap(df, output_path,
 
     # Remove duplicates and pivot
     df_unique = df.drop_duplicates(subset=[binding_col, antigen_col], keep='first')
+
+    # Create mean matrix
     matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=value_col)
     matrix = matrix.reindex(index=binding_entities, columns=antigens)
+
     if matrix.isna().all().all():
         print(f"Warning: All values are NaN in matrix for {value_col}")
         return
@@ -204,33 +223,46 @@ def create_confusion_matrix_heatmap(df, output_path,
     # Make the plot
     plt.figure(figsize=figsize)
 
-    # For MSE, use viridis colormap with reverse (lower is better)
+    # Determine colormap and label based on value type
     if 'MSE' in value_col or 'mse' in value_col.lower():
         cmap = 'viridis_r'
-        colorbar_label = 'Antigen Aligned Center Position MSE (Å²)'
+        colorbar_label = 'Center Position MSE (Angstrom squared)'
+        diagonal_color = 'red'
+    elif 'energy' in value_col.lower() or 'deltag' in value_col.lower():
+        cmap = 'RdYlBu_r'
+        colorbar_label = 'Binding Energy (kcal/mol)'
+        diagonal_color = 'blue'
+    elif 'score' in value_col.lower() or 'confidence' in value_col.lower():
+        cmap = 'viridis'
+        colorbar_label = 'Confidence Score'
+        diagonal_color = 'red'
     else:
-        # For binding energy, use YlOrRd (more negative is better)
-        cmap = 'YlOrRd'
         colorbar_label = value_col.replace('_', ' ')
+        diagonal_color = 'red'
 
-    # Initialize defaults
-    annot_labels = True
-    fmt_string = '.3f'
-    annot_kws = {'size': 18}
+    # Check for standard deviation column
+    std_col = value_col.replace('Mean_', 'Std_')
+    if std_col in df_unique.columns:
+        # Create std matrix
+        std_matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=std_col)
+        std_matrix = std_matrix.reindex(index=binding_entities, columns=antigens)
 
-    # Check if this is summary data with std columns
-    if 'Mean_' in value_col:
-        std_col = value_col.replace('Mean_', 'Std_')
-        if std_col in df_unique.columns:
-            # Custom error bar annotations
-            std_matrix = df_unique.pivot(index=binding_col, columns=antigen_col, values=std_col)
-            std_matrix = std_matrix.reindex(index=binding_entities, columns=antigens)
-            annot_labels = matrix.round(3).astype(str) + '\n±' + std_matrix.round(3).astype(str)
-            fmt_string = ''
-            annot_kws = {'size': 16}
+        # Create combined annotations like "2.35\n±0.12"
+        annot_labels = []
+        for i in range(len(matrix.index)):
+            row_labels = []
+            for j in range(len(matrix.columns)):
+                mean_val = matrix.iloc[i, j]
+                std_val = std_matrix.iloc[i, j]
 
-    if isinstance(annot_labels, np.ndarray) or isinstance(annot_labels, list):
-        # Custom annotations (with ±std), no formatting
+                if pd.isna(mean_val) or pd.isna(std_val):
+                    row_labels.append("")
+                else:
+                    # Format with error bars
+                    row_labels.append(f"{mean_val:.2f}\n±{std_val:.2f}")
+            annot_labels.append(row_labels)
+
+        # Use custom annotations
         ax = sns.heatmap(
             matrix,
             annot=annot_labels,
@@ -239,20 +271,19 @@ def create_confusion_matrix_heatmap(df, output_path,
             square=True,
             linewidths=0.5,
             cbar_kws={'label': colorbar_label},
-            annot_kws=annot_kws
+            annot_kws={'size': 14, 'ha': 'center', 'va': 'center'}
         )
     else:
-        # Standard numeric annotations
+        # Standard numeric annotations without error bars
         ax = sns.heatmap(
             matrix,
             annot=True,
-            fmt='.3f',
+            fmt='.2f',
             cmap=cmap,
             square=True,
             linewidths=0.5,
             cbar_kws={'label': colorbar_label},
-            annot_kws={'size': 18},
-
+            annot_kws={'size': 16}
         )
 
     # Make colorbar label bigger
@@ -261,10 +292,8 @@ def create_confusion_matrix_heatmap(df, output_path,
 
     # Highlight the diagonal - these should be the real binding pairs
     for i in range(min(len(binding_entities), len(antigens))):
-        if 'Energy' in title or 'energy' in value_col.lower():
-            ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='blue', lw=5))
-        else:
-            ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=5))
+        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False,
+                                  edgecolor=diagonal_color, lw=5))
 
     # Title and labels with exact font sizes
     plt.title(title, fontsize=22, pad=20)
@@ -274,7 +303,7 @@ def create_confusion_matrix_heatmap(df, output_path,
     plt.yticks(rotation=0, fontsize=18)
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
 
@@ -287,43 +316,10 @@ def create_combined_plot(df_energy: pd.DataFrame, df_mse: pd.DataFrame, output_p
                         title: str = "AlphaFold3 Binding Evaluation",
                         figsize: tuple = (12, 10)) -> None:
     """
-    Create a combined visualization with binding energy and MSE.
-
-    Args:
-        df_energy: DataFrame containing binding energy data
-        df_mse: DataFrame containing MSE data
-        output_path: Path to save the plot
-        binding_col: Column name for binding entities
-        antigen_col: Column name for antigens
-        combo_col: Column name for combinations
-        energy_col: Column name for binding energy values
-        mse_col: Column name for MSE values
-        title: Plot title
-        figsize: Figure size as (width, height) tuple
+    Empty function - removed to simplify outputs.
     """
-    # Merge dataframes
-    df_combined = pd.merge(df_energy, df_mse, on=[binding_col, antigen_col], suffixes=('', '_mse'))
-
-    # Create figure with subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, gridspec_kw={'height_ratios': [1, 1]})
-
-    # Plot 1: Binding energy heatmap
-    pivot_energy = df_combined.pivot_table(index=binding_col, columns=antigen_col, values=energy_col)
-    sns.heatmap(pivot_energy, annot=True, fmt=".2f", cmap="coolwarm_r", ax=ax1,
-              cbar_kws={'label': 'Mean Estimated ΔG (kcal/mol)'})
-    ax1.set_title("Binding Energy Confusion Matrix")
-
-    # Plot 2: MSE heatmap
-    pivot_mse = df_combined.pivot_table(index=binding_col, columns=antigen_col, values=mse_col)
-    sns.heatmap(pivot_mse, annot=True, fmt=".2f", cmap="viridis_r", ax=ax2,
-              cbar_kws={'label': 'Center-Aligned MSE (Å²)'})
-    ax2.set_title("Binding Pose Consistency Across Seeds")
-
-    # Final styling
-    fig.suptitle(title, fontsize=16)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
-    plt.close()
+    print(f"Skipping combined plot: {output_path}")
+    pass
 
 
 def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
@@ -353,8 +349,6 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
     print(f"DEBUG: Using MSE column '{mse_col}' in matrix visualization")
 
     # CREATE A STANDARDIZED MSE DATAFRAME FOR MERGING
-    # df_mse_standard = df_mse[["Combination", mse_col]].copy()
-    # df_mse_standard = df_mse_standard.rename(columns={mse_col: "Center_Position_MSE"})
     df_mse_standard = df_mse[["Combination", "Center_Position_MSE_Top"]].rename(
         columns={"Center_Position_MSE_Top": "Center_Position_MSE"})
 
@@ -454,7 +448,7 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
         linewidths=0.5,
         center=0
     )
-    energy_label = "Approximate ΔG (kcal/mol)"
+    energy_label = "Approximate Delta G (kcal/mol)"
     if scale_two_chain:
         energy_label += " (Scaled)"
     ax_approx.set_title(energy_label, fontsize=14)
@@ -473,7 +467,7 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
         linewidths=0.5,
         center=0
     )
-    prodigy_label = "PRODIGY ΔG (kcal/mol)"
+    prodigy_label = "PRODIGY Delta G (kcal/mol)"
     if scale_two_chain:
         prodigy_label += " (Scaled)"
     ax_prodigy.set_title(prodigy_label, fontsize=14)
@@ -491,7 +485,7 @@ def create_matrix_visualization(df_energy: pd.DataFrame, df_mse: pd.DataFrame,
         ax=ax_mse,
         linewidths=0.5
     )
-    ax_mse.set_title(f"Pose Consistency ({mse_col}, Å²)", fontsize=14)
+    ax_mse.set_title(f"Pose Consistency ({mse_col}, Angstrom squared)", fontsize=14)
     ax_mse.set_xlabel("Antigen", fontsize=12)
     ax_mse.set_ylabel("", fontsize=12)  # No y-label for this subplot
 
