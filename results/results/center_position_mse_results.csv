@@ -2,8 +2,8 @@ Binding_Entity,Antigen,Combination,Center_Position_MSE_Top,Center_Position_MSE_W
 nbalb_8y9t,alb,nbalb_8y9t_alb,356.92056,450.93571900725624,50,1
 nbalb_8y9t,gfp,nbalb_8y9t_gfp,0.5872207,171.67359361591923,50,1
 nbalb_8y9t,lys,nbalb_8y9t_lys,69.58846,130.6612802390928,50,1
-nbalb_8y9t,mcherry,nbalb_8y9t_mcherry,221.55542,236.73627602312385,25,1
-nbalb_8y9t,sars,nbalb_8y9t_sars,44.368347,179.32016885787917,25,1
+nbalb_8y9t,mcherry,nbalb_8y9t_mcherry,238.36385,242.67440256277703,50,1
+nbalb_8y9t,sars,nbalb_8y9t_sars,25.192057,219.3778415673997,50,1
 nbgfp_6xzf,alb,nbgfp_6xzf_alb,247.36809,485.51225470261505,50,1
 nbgfp_6xzf,gfp,nbgfp_6xzf_gfp,0.27855965,104.48267158592023,50,1
 nbgfp_6xzf,lys,nbgfp_6xzf_lys,96.17179,124.4278041313576,50,1
