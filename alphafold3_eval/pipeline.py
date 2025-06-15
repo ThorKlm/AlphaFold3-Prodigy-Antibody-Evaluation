@@ -74,9 +74,10 @@ from alphafold3_eval.visualization import (
 
 # Create both MSE confusion matrices
 def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
-                          df_mse: pd.DataFrame, config: Config, is_scaled: bool = False):
+                          df_mse: pd.DataFrame, config: Config, is_scaled: bool = False,
+                          df_summary_top=None, df_summary_weighted=None):
     """
-    Create all visualizations matching regenerate_visualizations.py output.
+    Create all visualizations including 4 energy matrices.
     """
     suffix = "_scaled" if is_scaled else ""
     scale_text = " (Scaled)" if is_scaled else ""
@@ -100,7 +101,7 @@ def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
 
     print(f"  Using MSE column '{primary_mse_col}' for visualizations")
 
-    # 1. MSE Distribution Plot (using consistent naming)
+    # 1. MSE Distribution Plot
     mse_plot_path = config.results_dir / f"mse_distribution_plot{suffix}.png"
     plot_mse_distributions(
         df_mse,
@@ -109,7 +110,7 @@ def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
         title=f"Binding Pose Consistency Across AlphaFold3 Seeds{scale_text}"
     )
 
-    # 2. MSE Matrix Heatmaps (create both top model and weighted if available)
+    # 2. MSE Matrix Heatmaps
     if 'Center_Position_MSE_Top' in df_mse.columns:
         create_confusion_matrix_heatmap(
             df_mse,
@@ -128,17 +129,46 @@ def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
             cmap="viridis_r"
         )
 
-    # 3. Binding Energy Visualizations (if available)
+    # 3. Create 4 Energy Matrix Heatmaps
+    if df_summary_top is not None and df_summary_weighted is not None:
+
+        # List of (dataframe, approx_col, prodigy_col, filename_suffix, title_suffix)
+        energy_configs = [
+            (df_summary_top, "Mean_Approx_DeltaG_kcal_per_mol", "Mean_Prodigy_DeltaG_kcal_per_mol", "top", "Top Model"),
+            (df_summary_weighted, "Mean_Approx_DeltaG_kcal_per_mol", "Mean_Prodigy_DeltaG_kcal_per_mol", "weighted",
+             "Weighted")
+        ]
+
+        for df_data, approx_col, prodigy_col, filename_suffix, title_suffix in energy_configs:
+
+            # Approximation method matrix
+            if approx_col in df_data.columns:
+                matrix_path = config.results_dir / f"energy_matrix_{filename_suffix}_approx{suffix}.png"
+                create_confusion_matrix_heatmap(
+                    df_data,
+                    output_path=matrix_path,
+                    value_col=approx_col,
+                    title=f"Binding Energy Matrix - {title_suffix} Approximation{scale_text}",
+                    cmap="YlOrRd"
+                )
+
+            # PRODIGY method matrix
+            if prodigy_col in df_data.columns and not df_data[prodigy_col].isna().all():
+                matrix_path = config.results_dir / f"energy_matrix_{filename_suffix}_prodigy{suffix}.png"
+                create_confusion_matrix_heatmap(
+                    df_data,
+                    output_path=matrix_path,
+                    value_col=prodigy_col,
+                    title=f"Binding Energy Matrix - {title_suffix} PRODIGY{scale_text}",
+                    cmap="YlOrRd"
+                )
+
+    # 4. Original energy plot (keep for backwards compatibility)
     if 'Mean_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
-
-        # Energy plot with error bars (matching regenerate_visualizations.py style)
         energy_plot_path = config.results_dir / f"binding_energy_plot{suffix}.png"
-
-        import matplotlib.pyplot as plt
 
         plt.figure(figsize=(12, 6))
 
-        # Create error bar plot if std column exists
         if 'Std_Approx_DeltaG_kcal_per_mol' in df_summary.columns:
             x_positions = range(len(df_summary))
             plt.errorbar(
@@ -152,7 +182,6 @@ def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
             )
             plt.xticks(x_positions, df_summary['Combination'], rotation=45, ha='right')
         else:
-            # Fallback to simple scatter plot
             plt.scatter(range(len(df_summary)), df_summary['Mean_Approx_DeltaG_kcal_per_mol'])
             plt.xticks(range(len(df_summary)), df_summary['Combination'], rotation=45, ha='right')
 
@@ -183,16 +212,6 @@ def create_visualizations(df_models: pd.DataFrame, df_summary: pd.DataFrame,
             title=f"Mean ΔG vs Pose Consistency{scale_text}"
         )
 
-        # Energy matrix heatmap
-        energy_matrix_path = config.results_dir / f"energy_matrix{suffix}.png"
-        create_confusion_matrix_heatmap(
-            df_summary,
-            output_path=energy_matrix_path,
-            value_col="Mean_Approx_DeltaG_kcal_per_mol",
-            title=f"Binding Energy Matrix{scale_text}",
-            cmap="YlOrRd"
-        )
-
     print(f"  Visualizations{scale_text} completed")
 
 
@@ -204,13 +223,6 @@ def run_pipeline(input_dir, config, use_prodigy=True,
                  clean_intermediate=False, input_format="alphafold3"):
     """
     Run the complete analysis pipeline.
-
-    Args:
-        input_dir: Directory containing input files
-        config: Configuration object
-        use_prodigy: Whether to use PRODIGY for binding energy calculation
-        clean_intermediate: Whether to clean up intermediate files after analysis
-        input_format: Format of input files ("alphafold3" or "alphafold2_multimer")
     """
     print("Starting AlphaFold binding evaluation pipeline...")
     print("  Input directory: " + str(input_dir))
@@ -219,31 +231,21 @@ def run_pipeline(input_dir, config, use_prodigy=True,
     print("  Input format: " + input_format)
     config.analysis_config["min_seeds"] = 2
 
-    # Step 1: Extract models based on format
+    # Step 1: Extract models
     combination_to_models = extract_models(input_dir, config, input_format)
-
     if not combination_to_models:
         raise ValueError("No valid models extracted from " + str(input_dir) + " using format " + input_format)
 
     # Step 2: Analyze MSE
     df_mse = analyze_mse_with_cache(combination_to_models, config)
 
-    # DEBUG: Print MSE dataframe columns to see what we have
-    print(f"DEBUG: MSE dataframe columns: {list(df_mse.columns)}")
+    # Step 3: Analyze binding energy (now returns 6 dataframes)
+    df_models, df_models_scaled, df_summary_top, df_summary_top_scaled, df_summary_weighted, df_summary_weighted_scaled = analyze_binding_energy_with_cache(
+        combination_to_models, config, use_prodigy)
 
-    # Step 3: Analyze binding energy (both unscaled and scaled)
-    df_models, df_models_scaled = analyze_binding_energy_with_cache(combination_to_models, config, use_prodigy)
-
-    # Step 4: Create summary dataframes
-    df_summary = create_summary_dataframe(df_models)
-    df_summary_scaled = create_summary_dataframe(df_models_scaled)
-
-    # Step 5: FIXED - Find the correct MSE column name and merge properly
-    # Check what MSE columns actually exist
+    # Step 4: Find correct MSE column for merging
     mse_columns = [col for col in df_mse.columns if 'MSE' in col]
-    print(f"DEBUG: Available MSE columns: {mse_columns}")
 
-    # Use the first available MSE column, preferring the top model version
     if 'Center_Position_MSE_Top' in df_mse.columns:
         mse_col = 'Center_Position_MSE_Top'
     elif 'Center_Position_MSE_Weighted' in df_mse.columns:
@@ -253,42 +255,34 @@ def run_pipeline(input_dir, config, use_prodigy=True,
     elif mse_columns:
         mse_col = mse_columns[0]
     else:
-        raise ValueError(f"No MSE columns found in dataframe. Available columns: {list(df_mse.columns)}")
+        raise ValueError(f"No MSE columns found in dataframe")
 
-    print(f"DEBUG: Using MSE column '{mse_col}' for merging")
-
-    # Create a standardized MSE column for merging
+    # Create standardized MSE column for merging
     df_mse_for_merge = df_mse[["Combination", mse_col]].copy()
     df_mse_for_merge = df_mse_for_merge.rename(columns={mse_col: "Center_Position_MSE"})
 
-    # Save combined results (unscaled)
-    df_combined = pd.merge(
-        df_summary,
-        df_mse_for_merge,  # Use the renamed dataframe
-        on="Combination",
-        how="outer"
-    )
+    # Step 5: Save combined results (using weighted summary for backwards compatibility)
+    df_combined = pd.merge(df_summary_weighted, df_mse_for_merge, on="Combination", how="outer")
     df_combined.to_csv(config.output_files["combined_results"], index=False)
     print("  Combined results saved to: " + str(config.output_files["combined_results"]))
 
-    # Save combined results (scaled)
-    df_combined_scaled = pd.merge(
-        df_summary_scaled,
-        df_mse_for_merge,  # Use the same renamed dataframe
-        on="Combination",
-        how="outer"
-    )
+    df_combined_scaled = pd.merge(df_summary_weighted_scaled, df_mse_for_merge, on="Combination", how="outer")
     scaled_path = str(config.output_files["combined_results"]).replace(".csv", "_scaled.csv")
     df_combined_scaled.to_csv(scaled_path, index=False)
     print("  Scaled combined results saved to: " + scaled_path)
 
-    # Step 6: Create visualizations (unscaled) - pass the original MSE dataframe
-    create_visualizations(df_models, df_summary, df_mse, config, is_scaled=False)
+    # Step 6: Create visualizations with all 4 energy matrices
+    create_visualizations(
+        df_models,
+        df_summary_weighted,  # Use weighted for backward compatibility
+        df_mse,
+        config,
+        is_scaled=False,
+        df_summary_top=df_summary_top,
+        df_summary_weighted=df_summary_weighted
+    )
 
-    # Step 7: Create visualizations (scaled)
-    # create_visualizations(df_models_scaled, df_summary_scaled, df_mse, config, is_scaled=True)
-
-    # Step 8: Clean up intermediate files if requested
+    # Step 7: Clean up if requested
     if clean_intermediate:
         cleanup_intermediate_files(config)
 
@@ -502,29 +496,31 @@ def analyze_binding_energy(combination_to_models, config, use_prodigy=True):
 
 # Update the analyze_binding_energy function to use caching
 def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]],
-                                     config: Config, 
-                                     use_prodigy: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                                      config: Config,
+                                      use_prodigy: bool = True) -> Tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Analyze binding energy with caching support.
+    Returns both individual model data and summary dataframes for top model and weighted approaches.
     """
     print("Analyzing binding energy with caching...")
-    
+
     # Initialize cache
     cache = BindingEnergyCache(config.temp_dir / "binding_energy_cache")
     cache_stats = cache.get_cache_stats()
     print(f"  Cache statistics: {cache_stats}")
-    
+
     # Create temp directory for PRODIGY PDB files
     prodigy_temp_dir = os.path.join(config.temp_dir, "prodigy_pdbs")
     os.makedirs(prodigy_temp_dir, exist_ok=True)
-    
+
     records = []
     cached_count = 0
     computed_count = 0
-    
+
     for combination, model_paths in combination_to_models.items():
         print(f"  Computing binding energy for {combination}")
-        
+
         # Parse combination
         parts = combination.split('_')
         if len(parts) >= 3:
@@ -533,22 +529,30 @@ def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]
         else:
             binding_entity = parts[0]
             antigen = parts[1]
-        
+
         for model_path in model_paths:
             try:
-                # Parse metadata
+                # Parse metadata to get model rank
                 meta = parse_model_filename(model_path)
                 if not meta:
                     continue
-                
+
+                # Extract model rank from filename (e.g., "_model_0.cif" -> rank 0)
+                model_rank = 0
+                if "_model_" in model_path:
+                    try:
+                        model_rank = int(model_path.split("_model_")[1].split(".")[0])
+                    except:
+                        model_rank = 0
+
                 # Check cache for simple binding energy
                 cached_simple = cache.get_cached_energy(
-                    model_path, 
+                    model_path,
                     method='simple',
                     temperature=config.prodigy_config["temperature"],
                     cutoff=config.analysis_config["contact_cutoff"]
                 )
-                
+
                 # Check cache for PRODIGY if needed
                 cached_prodigy = None
                 if use_prodigy:
@@ -558,22 +562,32 @@ def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]
                         temperature=config.prodigy_config["temperature"],
                         cutoff=config.analysis_config["contact_cutoff"]
                     )
-                
+
                 # Use cached values if available
                 if cached_simple and (not use_prodigy or cached_prodigy):
+                    # All required values are cached
                     approx_energy = cached_simple.get('energy', 0.0)
                     contacts = cached_simple.get('contacts', 0)
                     prodigy_energy = cached_prodigy.get('energy', None) if cached_prodigy else None
                     cached_count += 1
+
+                elif cached_simple and not use_prodigy:
+                    # Simple energy cached and PRODIGY not needed
+                    approx_energy = cached_simple.get('energy', 0.0)
+                    contacts = cached_simple.get('contacts', 0)
+                    prodigy_energy = None
+                    cached_count += 1
+
                 else:
-                    # Load structure and compute
+                    # Need to compute some or all values
+                    # Load structure only if needed
                     structure = load_structure(model_path)
                     if not structure:
                         continue
-                    
+
                     structure.binding_entity = binding_entity
-                    
-                    # Compute simple binding energy
+
+                    # Compute simple binding energy if not cached
                     if not cached_simple:
                         approx_energy, contacts = estimate_binding_energy_simple(
                             structure,
@@ -590,8 +604,8 @@ def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]
                     else:
                         approx_energy = cached_simple.get('energy', 0.0)
                         contacts = cached_simple.get('contacts', 0)
-                    
-                    # Compute PRODIGY if needed
+
+                    # Compute PRODIGY if needed and not cached
                     prodigy_energy = None
                     if use_prodigy and not cached_prodigy:
                         prodigy_energy = run_prodigy_binding_energy(
@@ -610,38 +624,38 @@ def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]
                             )
                     elif cached_prodigy:
                         prodigy_energy = cached_prodigy.get('energy', None)
-                    
+
                     computed_count += 1
-                
+
                 # Detect antibody type
                 antibody_type = detect_antibody_type(binding_entity)
-                
-                # Create record
+
+                # Create record with model rank info
                 record = {
                     "Combination": combination,
                     "Binding_Entity": binding_entity,
                     "Antigen": antigen,
                     "Seed": meta["seed"],
+                    "Model_Rank": model_rank,
                     "Approx_DeltaG_kcal_per_mol": approx_energy,
                     "Prodigy_DeltaG_kcal_per_mol": prodigy_energy,
                     "Contacts": contacts,
                     "Model_Path": model_path,
                     "Antibody_Type": antibody_type
                 }
-                
+
                 records.append(record)
-                
+
             except Exception as e:
                 print(f"  Error processing {model_path}: {e}")
-    
+
     print(f"  Used {cached_count} cached results, computed {computed_count} new results")
-    
-    # Create DataFrame and continue with the rest of the original function...
+
+    # Create main dataframes
     df_models = pd.DataFrame(records)
-    
     if df_models.empty:
         raise ValueError("No valid models processed")
-    
+
     # Create scaled versions
     df_models_scaled = df_models.copy()
     for index, row in df_models_scaled.iterrows():
@@ -650,20 +664,32 @@ def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]
                 df_models_scaled.at[index, "Approx_DeltaG_kcal_per_mol"] *= 0.5
             if pd.notna(row["Prodigy_DeltaG_kcal_per_mol"]):
                 df_models_scaled.at[index, "Prodigy_DeltaG_kcal_per_mol"] *= 0.5
-    
+
     df_models_scaled["Is_Scaled"] = df_models_scaled["Antibody_Type"] == 2
     df_models["Is_Scaled"] = False
-    
+
+    # Create summary dataframes for different approaches
+    # Top model only (rank 0)
+    df_top_models = df_models[df_models['Model_Rank'] == 0]
+    df_top_models_scaled = df_models_scaled[df_models_scaled['Model_Rank'] == 0]
+
+    df_summary_top = create_summary_dataframe(df_top_models)
+    df_summary_top_scaled = create_summary_dataframe(df_top_models_scaled)
+
+    # Weighted (all models) - same as original approach
+    df_summary_weighted = create_summary_dataframe(df_models)
+    df_summary_weighted_scaled = create_summary_dataframe(df_models_scaled)
+
     # Save results
     df_models.to_csv(config.output_files["binding_energy"], index=False)
     scaled_path = str(config.output_files["binding_energy"]).replace(".csv", "_scaled.csv")
     df_models_scaled.to_csv(scaled_path, index=False)
-    
+
     # Clean up
     shutil.rmtree(prodigy_temp_dir, ignore_errors=True)
-    
-    return df_models, df_models_scaled
 
+    print("analyze_binding_energy_with_cache", "returning: df_models, df_models_scaled, df_summary_top, df_summary_top_scaled, df_summary_weighted, df_summary_weighted_scaled")
+    return df_models, df_models_scaled, df_summary_top, df_summary_top_scaled, df_summary_weighted, df_summary_weighted_scaled
 
 # Continue in alphafold3_eval/pipeline.py
 
@@ -1006,183 +1032,6 @@ def analyze_mse_with_cache(combination_to_models: Dict[str, List[str]], config: 
 
 
 # Fix the analyze_binding_energy_with_cache function in pipeline.py
-
-def analyze_binding_energy_with_cache(combination_to_models: Dict[str, List[str]],
-                                      config: Config,
-                                      use_prodigy: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Analyze binding energy with caching support.
-    """
-    print("Analyzing binding energy with caching...")
-
-    # Initialize cache
-    cache = BindingEnergyCache(config.temp_dir / "binding_energy_cache")
-    cache_stats = cache.get_cache_stats()
-    print(f"  Cache statistics: {cache_stats}")
-
-    # Create temp directory for PRODIGY PDB files
-    prodigy_temp_dir = os.path.join(config.temp_dir, "prodigy_pdbs")
-    os.makedirs(prodigy_temp_dir, exist_ok=True)
-
-    records = []
-    cached_count = 0
-    computed_count = 0
-
-    for combination, model_paths in combination_to_models.items():
-        print(f"  Computing binding energy for {combination}")
-
-        # Parse combination
-        parts = combination.split('_')
-        if len(parts) >= 3:
-            binding_entity = parts[0] + '_' + parts[1]
-            antigen = parts[2]
-        else:
-            binding_entity = parts[0]
-            antigen = parts[1]
-
-        for model_path in model_paths:
-            try:
-                # Parse metadata
-                meta = parse_model_filename(model_path)
-                if not meta:
-                    continue
-
-                # Check cache for simple binding energy
-                cached_simple = cache.get_cached_energy(
-                    model_path,
-                    method='simple',
-                    temperature=config.prodigy_config["temperature"],
-                    cutoff=config.analysis_config["contact_cutoff"]
-                )
-
-                # Check cache for PRODIGY if needed
-                cached_prodigy = None
-                if use_prodigy:
-                    cached_prodigy = cache.get_cached_energy(
-                        model_path,
-                        method='prodigy',
-                        temperature=config.prodigy_config["temperature"],
-                        cutoff=config.analysis_config["contact_cutoff"]
-                    )
-
-                # Use cached values if available
-                if cached_simple and (not use_prodigy or cached_prodigy):
-                    # All required values are cached
-                    approx_energy = cached_simple.get('energy', 0.0)
-                    contacts = cached_simple.get('contacts', 0)
-                    prodigy_energy = cached_prodigy.get('energy', None) if cached_prodigy else None
-                    cached_count += 1
-                    print(f"    Using cached results for {os.path.basename(model_path)}")
-
-                elif cached_simple and not use_prodigy:
-                    # Simple energy cached and PRODIGY not needed
-                    approx_energy = cached_simple.get('energy', 0.0)
-                    contacts = cached_simple.get('contacts', 0)
-                    prodigy_energy = None
-                    cached_count += 1
-                    print(f"    Using cached simple energy for {os.path.basename(model_path)}")
-
-                else:
-                    # Need to compute some or all values
-                    print(f"    Computing binding energy for {os.path.basename(model_path)}")
-
-                    # Load structure only if needed
-                    structure = load_structure(model_path)
-                    if not structure:
-                        continue
-
-                    structure.binding_entity = binding_entity
-
-                    # Compute simple binding energy if not cached
-                    if not cached_simple:
-                        approx_energy, contacts = estimate_binding_energy_simple(
-                            structure,
-                            cutoff=config.analysis_config["contact_cutoff"]
-                        )
-                        # Cache the result
-                        cache.cache_energy(
-                            model_path,
-                            {'energy': approx_energy, 'contacts': contacts},
-                            method='simple',
-                            temperature=config.prodigy_config["temperature"],
-                            cutoff=config.analysis_config["contact_cutoff"]
-                        )
-                    else:
-                        approx_energy = cached_simple.get('energy', 0.0)
-                        contacts = cached_simple.get('contacts', 0)
-
-                    # Compute PRODIGY if needed and not cached
-                    prodigy_energy = None
-                    if use_prodigy and not cached_prodigy:
-                        prodigy_energy = run_prodigy_binding_energy(
-                            structure,
-                            temp=config.prodigy_config["temperature"],
-                            temp_dir=prodigy_temp_dir
-                        )
-                        if prodigy_energy is not None:
-                            # Cache the result
-                            cache.cache_energy(
-                                model_path,
-                                {'energy': prodigy_energy},
-                                method='prodigy',
-                                temperature=config.prodigy_config["temperature"],
-                                cutoff=config.analysis_config["contact_cutoff"]
-                            )
-                    elif cached_prodigy:
-                        prodigy_energy = cached_prodigy.get('energy', None)
-
-                    computed_count += 1
-
-                # Detect antibody type
-                antibody_type = detect_antibody_type(binding_entity)
-
-                # Create record
-                record = {
-                    "Combination": combination,
-                    "Binding_Entity": binding_entity,
-                    "Antigen": antigen,
-                    "Seed": meta["seed"],
-                    "Approx_DeltaG_kcal_per_mol": approx_energy,
-                    "Prodigy_DeltaG_kcal_per_mol": prodigy_energy,
-                    "Contacts": contacts,
-                    "Model_Path": model_path,
-                    "Antibody_Type": antibody_type
-                }
-
-                records.append(record)
-
-            except Exception as e:
-                print(f"  Error processing {model_path}: {e}")
-
-    print(f"  Used {cached_count} cached results, computed {computed_count} new results")
-
-    # Continue with the rest of the original function...
-    df_models = pd.DataFrame(records)
-
-    if df_models.empty:
-        raise ValueError("No valid models processed")
-
-    # Create scaled versions
-    df_models_scaled = df_models.copy()
-    for index, row in df_models_scaled.iterrows():
-        if row["Antibody_Type"] == 2:
-            if pd.notna(row["Approx_DeltaG_kcal_per_mol"]):
-                df_models_scaled.at[index, "Approx_DeltaG_kcal_per_mol"] *= 0.5
-            if pd.notna(row["Prodigy_DeltaG_kcal_per_mol"]):
-                df_models_scaled.at[index, "Prodigy_DeltaG_kcal_per_mol"] *= 0.5
-
-    df_models_scaled["Is_Scaled"] = df_models_scaled["Antibody_Type"] == 2
-    df_models["Is_Scaled"] = False
-
-    # Save results
-    df_models.to_csv(config.output_files["binding_energy"], index=False)
-    scaled_path = str(config.output_files["binding_energy"]).replace(".csv", "_scaled.csv")
-    df_models_scaled.to_csv(scaled_path, index=False)
-
-    # Clean up
-    shutil.rmtree(prodigy_temp_dir, ignore_errors=True)
-
-    return df_models, df_models_scaled
 
 def analyze_confidence_metrics(
         combination_to_models: Dict[str, List[str]],
