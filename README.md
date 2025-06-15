@@ -33,8 +33,7 @@ with rather clear diagonal pattern showing true binding pairs successfully for m
 ### Weighted MSE Matrix
 <img src="results/results/mse_matrix_weighted.png" width="600">
 
-*Enhanced discrimination using ensemble approach across all ranked models.*
-
+*A
 ## Usage
 
 ### Standard Analysis
